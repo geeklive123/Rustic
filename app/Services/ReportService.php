@@ -1,0 +1,44 @@
+<?php
+
+namespace App\Services;
+
+use Carbon\CarbonImmutable;
+use Illuminate\Database\Query\Builder;
+use Illuminate\Support\Facades\DB;
+
+class ReportService
+{
+    public function bounds(array $data): array
+    {
+        $today = CarbonImmutable::now('America/La_Paz')->startOfDay();
+        [$start, $end] = match ($data['period'] ?? 'today') {
+            'yesterday' => [$today->subDay(), $today],
+            'week' => [$today->startOfWeek(), $today->startOfWeek()->addWeek()],
+            'month' => [$today->startOfMonth(), $today->startOfMonth()->addMonth()],
+            'custom' => [CarbonImmutable::createFromFormat('!Y-m-d', $data['start_date'], 'America/La_Paz'), CarbonImmutable::createFromFormat('!Y-m-d', $data['end_date'], 'America/La_Paz')->addDay()],
+            default => [$today, $today->addDay()],
+        };
+
+        return [$start->utc(), $end->utc()];
+    }
+
+    public function orders(array $data): Builder
+    {
+        [$start, $end] = $this->bounds($data);
+
+        return DB::table('orders')->where('orders.created_at', '>=', $start)->where('orders.created_at', '<', $end);
+    }
+
+    public function summary(array $data): array
+    {
+        $row = $this->orders($data)->leftJoin('payments', 'payments.order_id', '=', 'orders.id')
+            ->selectRaw("COUNT(*) AS order_count, COALESCE(SUM(orders.total_cents),0) AS total_cents,
+                COALESCE(SUM(CASE WHEN payments.method = 'CASH' AND payments.status = 'cash_collected' THEN payments.amount_cents ELSE 0 END),0) AS cash_cents,
+                COALESCE(SUM(CASE WHEN payments.method = 'QR_SIMULATED' AND payments.status = 'simulated' THEN 1 ELSE 0 END),0) AS simulated_qr_count,
+                COALESCE(SUM(CASE WHEN payments.method = 'QR_SIMULATED' AND payments.status = 'simulated' THEN payments.amount_cents ELSE 0 END),0) AS simulated_qr_cents,
+                COALESCE(SUM(CASE WHEN orders.payment_status = 'unpaid' THEN 1 ELSE 0 END),0) AS unpaid_count")
+            ->first();
+
+        return array_map('intval', (array) $row);
+    }
+}

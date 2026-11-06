@@ -1,0 +1,9 @@
+# Caja
+
+Administrador y vendedor con `cash.manage` pueden abrir un turno propio con UUID, UUID de operacion y monto inicial no negativo en centavos. Un vendedor puede tener como maximo un turno abierto. El identificador comercial del turno es `uuid` y el ID numerico se utiliza en las rutas y en `cash_shift_id`. Las operaciones de apertura y cierre se repiten con los mismos identificadores, usuario e importes; los reintentos identicos no duplican registros. Cambiar los datos de una operacion o cerrar dos veces con claves diferentes devuelve 409.
+
+Unicamente los pedidos `CASH` que indiquen el ID de un turno abierto del vendedor asignan su pago a ese turno. Los pedidos sin ID, incluidos los historicos y los enviados por el Android actual, no se asignan ni alteran automaticamente. Esto es deliberado: el servidor no dispone de un turno confiable para ventas recibidas tras operar offline. `QR_SIMULATED` nunca integra caja. El monto recibido y el cambio no forman parte del contrato actual; caja suma el importe de la venta registrado, no efectivo fisico entregado por el cliente.
+
+Al cerrar, el importe esperado es apertura mas pagos de efectivo asociados; la diferencia es contado menos esperado. El cierre guarda sus totales, actor y fecha UTC. El mismo bloqueo por usuario serializa pagos asociados y cierre, y una restriccion unica impide dos turnos abiertos por usuario. Pedidos posteriores al cierre con ese ID se rechazan; un reintento identico de un pedido ya registrado sigue siendo idempotente. Los movimientos manuales, retiros, reembolsos y anulaciones no estan implementados.
+
+Los scripts `tests/Concurrency/check.php`, `cash-run.php`, `run.php` y `kitchen-run.php` requieren `APP_ENV=testing`, MySQL en `127.0.0.1` y base efectiva `rustik_pos_concurrency_test`. Comprueban el nombre antes de escribir, usan usuarios ficticios y dejan datos de prueba en esa base dedicada. No usarlos sobre `rustik_pos_dev` ni ejecutar `migrate:fresh` en desarrollo.
