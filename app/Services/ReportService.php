@@ -36,7 +36,9 @@ class ReportService
                 COALESCE(SUM(CASE WHEN payments.method = 'CASH' AND payments.status = 'cash_collected' THEN payments.amount_cents ELSE 0 END),0) AS cash_cents,
                 COALESCE(SUM(CASE WHEN payments.method = 'QR_SIMULATED' AND payments.status = 'simulated' THEN 1 ELSE 0 END),0) AS simulated_qr_count,
                 COALESCE(SUM(CASE WHEN payments.method = 'QR_SIMULATED' AND payments.status = 'simulated' THEN payments.amount_cents ELSE 0 END),0) AS simulated_qr_cents,
-                COALESCE(SUM(CASE WHEN orders.payment_status = 'unpaid' THEN 1 ELSE 0 END),0) AS unpaid_count")
+                COALESCE(SUM(CASE WHEN payments.method = 'QR_STATIC' AND payments.status = 'qr_verified' THEN 1 ELSE 0 END),0) AS verified_qr_count,
+                COALESCE(SUM(CASE WHEN payments.method = 'QR_STATIC' AND payments.status = 'qr_verified' THEN payments.amount_cents ELSE 0 END),0) AS verified_qr_cents,
+                COALESCE(SUM(CASE WHEN orders.payment_status IN ('unpaid', 'qr_pending') THEN 1 ELSE 0 END),0) AS unpaid_count")
             ->first();
 
         return array_map('intval', (array) $row);

@@ -10,6 +10,6 @@ class Payment extends Model
 
     protected function casts(): array
     {
-        return ['amount_cents' => 'integer'];
+        return ['amount_cents' => 'integer', 'confirmed_at' => 'immutable_datetime'];
     }
 }

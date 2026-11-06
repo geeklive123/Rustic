@@ -134,7 +134,7 @@ class OrderService
                     abort(409, 'El total esperado no coincide; no se registro la venta.');
                 }
                 $status = match ($data['payment_method']) {
-                    'CASH' => 'cash_collected', 'QR_SIMULATED' => 'simulated', default => 'unpaid'
+                    'CASH' => 'cash_collected', 'QR_SIMULATED' => 'simulated', 'QR_STATIC' => 'qr_pending', default => 'unpaid'
                 };
                 $order->update(['total_cents' => $total, 'payment_status' => $status]);
                 if ($data['payment_method'] !== 'UNPAID') {

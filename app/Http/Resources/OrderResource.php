@@ -37,7 +37,7 @@ class OrderResource extends JsonResource
         if (! $kitchen) {
             $data += ['operation_id' => $this->operation_id, 'device_id' => $this->device_id, 'seller_id' => $this->seller_id,
                 'total_cents' => $this->total_cents, 'payment_status' => $this->payment_status,
-                'payment' => $this->payment ? ['method' => $this->payment->method, 'status' => $this->payment->status, 'amount_cents' => $this->payment->amount_cents] : null];
+                'payment' => $this->payment ? ['method' => $this->payment->method, 'status' => $this->payment->status, 'amount_cents' => $this->payment->amount_cents] + ($this->payment->method === 'QR_STATIC' ? ['confirmed_by' => $this->payment->confirmed_by, 'confirmed_at' => $this->payment->confirmed_at?->toISOString(), 'reference' => $this->payment->reference, 'operation_id' => $this->payment->confirmation_operation_id] : []) : null];
         }
 
         return $data;

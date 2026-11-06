@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CashShiftController;
 use App\Http\Controllers\Api\CatalogController;
 use App\Http\Controllers\Api\KitchenController;
+use App\Http\Controllers\Api\ManualQrPaymentController;
 use App\Http\Controllers\Api\OrderController;
 use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\UserController;
@@ -27,6 +28,7 @@ Route::prefix('v1')->group(function (): void {
             Route::patch('/admin/catalog/{type}/{id}', [CatalogController::class, 'write'])->whereIn('type', ['categories', 'products', 'extras', 'options'])->whereNumber('id');
         });
         Route::post('/orders', [OrderController::class, 'store'])->middleware('permission:orders.create');
+        Route::post('/orders/{uuid}/qr-confirmation', [ManualQrPaymentController::class, 'store'])->whereUuid('uuid')->middleware('permission:payments.create');
         Route::get('/kitchen/orders', [KitchenController::class, 'index'])->middleware('permission:kitchen.view');
         Route::get('/kitchen/orders/{uuid}', [KitchenController::class, 'show'])->whereUuid('uuid')->middleware('permission:kitchen.view');
         Route::patch('/kitchen/orders/{uuid}/status', [KitchenController::class, 'update'])->whereUuid('uuid')->middleware('permission:orders.view');
