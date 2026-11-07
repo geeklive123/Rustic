@@ -87,4 +87,66 @@ class DailyWebReportTest extends TestCase
         $this->assertSame([12, 11, 10, 9, 8], $response->viewData('products')->pluck('product_id')->all());
         $this->assertSame(range(12, 3), $response->viewData('sales')->pluck('id')->all());
     }
+
+    public function test_all_periods_use_la_paz_dates_and_read_only_queries(): void
+    {
+        config(['reports.allowed_networks' => ['127.0.0.1']]);
+        // Wednesday 18 November in La Paz: Monday 16 starts the week.
+        CarbonImmutable::setTestNow('2026-11-18 12:00:00 UTC');
+        foreach ([
+            [1, '2026-10-31 04:00:00'], [2, '2026-11-01 04:00:00'],
+            [3, '2026-11-16 03:59:59'], [4, '2026-11-16 04:00:00'],
+            [5, '2026-11-17 03:59:59'], [6, '2026-11-17 04:00:00'],
+            [7, '2026-11-18 03:59:59'], [8, '2026-11-18 04:00:00'],
+            [9, '2026-11-19 03:59:59'], [10, '2026-11-19 04:00:00'],
+            [11, '2026-11-23 04:00:00'], [12, '2026-12-01 04:00:00'],
+        ] as [$id, $created]) {
+            DB::table('orders')->insert(['id' => $id, 'created_at' => $created, 'total_cents' => $id * 100, 'payment_status' => 'unpaid']);
+            DB::table('order_items')->insert(['order_id' => $id, 'product_id' => $id, 'product_name' => 'Producto '.$id, 'quantity' => $id]);
+        }
+        foreach ([[4, 'CASH', 'cash_collected'], [5, 'QR_SIMULATED', 'simulated'], [6, 'QR_STATIC', 'qr_verified'], [7, 'QR_STATIC', 'qr_pending']] as [$id, $method, $status]) {
+            DB::table('payments')->insert(['order_id' => $id, 'method' => $method, 'status' => $status, 'amount_cents' => $id * 100]);
+        }
+        foreach ([
+            ['', [9, 8]],
+            ['?period=today', [9, 8]],
+            ['?period=yesterday', [7, 6]],
+            ['?period=week', [10, 9, 8, 7, 6, 5, 4]],
+            ['?period=month', [11, 10, 9, 8, 7, 6, 5, 4, 3, 2]],
+            ['?period=custom&start_date=2026-11-16&end_date=2026-11-17', [7, 6, 5, 4]],
+        ] as [$query, $ids]) {
+            DB::flushQueryLog();
+            DB::enableQueryLog();
+            $response = $this->call('GET', '/reportes'.$query, server: ['REMOTE_ADDR' => '127.0.0.1'])->assertOk();
+            $this->assertSame($ids, $response->viewData('sales')->pluck('id')->all());
+            $this->assertSame(array_sum($ids) * 100, $response->viewData('summary')['total_cents']);
+            $this->assertSame(count($ids), $response->viewData('summary')['unpaid_count']);
+            $this->assertSame($ids[0], $response->viewData('products')->first()->product_id);
+            foreach (DB::getQueryLog() as $sql) {
+                $this->assertMatchesRegularExpression('/^\s*select\b/i', $sql['query']);
+            }
+        }
+        $custom = $this->call('GET', '/reportes?period=custom&start_date=2026-11-16&end_date=2026-11-17', server: ['REMOTE_ADDR' => '127.0.0.1']);
+        $this->assertSame(400, $custom->viewData('summary')['cash_cents']);
+        $this->assertSame(500, $custom->viewData('summary')['simulated_qr_cents']);
+        $this->assertSame(600, $custom->viewData('summary')['verified_qr_cents']);
+        $custom->assertSee('16/11/2026 al 17/11/2026')->assertSee('start_date=2026-11-16&amp;end_date=2026-11-17', false)
+            ->assertSee('16/11/2026 00:00');
+    }
+
+    public function test_invalid_filters_are_rejected_without_querying_orders(): void
+    {
+        config(['reports.allowed_networks' => ['127.0.0.1']]);
+        foreach ([
+            '?period=other', '?period=', '?period=custom',
+            '?period=custom&start_date=2026-02-30&end_date=2026-03-01',
+            '?period=custom&start_date=2026-11-18&end_date=2026-11-17',
+            '?period=custom&start_date=2026-11-01&end_date=invalid',
+        ] as $query) {
+            DB::flushQueryLog();
+            DB::enableQueryLog();
+            $this->call('GET', '/reportes'.$query, server: ['REMOTE_ADDR' => '127.0.0.1'])->assertStatus(422)->assertSee('Revise los filtros');
+            $this->assertSame([], DB::getQueryLog());
+        }
+    }
 }
