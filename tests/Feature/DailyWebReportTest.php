@@ -12,9 +12,12 @@ class DailyWebReportTest extends TestCase
     {
         parent::setUp();
         // Minimal isolated in-memory schema; no application migrations are run.
-        DB::statement('CREATE TABLE orders (id INTEGER PRIMARY KEY, created_at TEXT, total_cents INTEGER, payment_status TEXT)');
+        DB::statement('CREATE TABLE orders (id INTEGER PRIMARY KEY, created_at TEXT, total_cents INTEGER, payment_status TEXT, kitchen_status TEXT, seller_id INTEGER, notes TEXT, customer_name TEXT)');
         DB::statement('CREATE TABLE payments (id INTEGER PRIMARY KEY, order_id INTEGER UNIQUE, method TEXT, status TEXT, amount_cents INTEGER)');
-        DB::statement('CREATE TABLE order_items (id INTEGER PRIMARY KEY, order_id INTEGER, product_id INTEGER, product_name TEXT, quantity INTEGER)');
+        DB::statement('CREATE TABLE order_items (id INTEGER PRIMARY KEY, order_id INTEGER, product_id INTEGER, product_name TEXT, quantity INTEGER, unit_price_cents INTEGER, line_total_cents INTEGER, notes TEXT)');
+        DB::statement('CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)');
+        DB::statement('CREATE TABLE order_item_extras (id INTEGER PRIMARY KEY, order_item_id INTEGER, name TEXT, unit_price_cents INTEGER)');
+        DB::statement('CREATE TABLE order_item_options (id INTEGER PRIMARY KEY, order_item_id INTEGER, name TEXT)');
         CarbonImmutable::setTestNow('2026-11-01 12:00:00 UTC');
     }
 
@@ -63,7 +66,7 @@ class DailyWebReportTest extends TestCase
         $response = $this->call('GET', '/reportes', server: ['REMOTE_ADDR' => '127.0.0.1']);
         $response->assertOk()->assertSee('Bs 135,00')->assertSee('Bs 123,45')->assertSee('Bs 2,50')->assertSee('Bs 5,05')
             ->assertSee('Simulado · no es cobro real')->assertSee('Hamburguesa')->assertSee('5 unidades')
-            ->assertSee('#2')->assertSee('00:00')->assertDontSee('#1')->assertDontSee('#7');
+            ->assertSee('#2')->assertSee('00:00')->assertDontSee('<td>#1</td>', false)->assertDontSee('<td>#7</td>', false);
         $summary = $response->viewData('summary');
         $this->assertSame(5, $summary['order_count']);
         $this->assertSame(2, $summary['unpaid_count']);
@@ -148,5 +151,47 @@ class DailyWebReportTest extends TestCase
             $this->call('GET', '/reportes'.$query, server: ['REMOTE_ADDR' => '127.0.0.1'])->assertStatus(422)->assertSee('Revise los filtros');
             $this->assertSame([], DB::getQueryLog());
         }
+    }
+
+    public function test_history_is_paginated_searchable_and_detail_preserves_filters_and_historical_values(): void
+    {
+        config(['reports.allowed_networks' => ['127.0.0.1']]);
+        DB::table('users')->insert(['id' => 1, 'name' => 'Vendedor Uno']);
+        for ($i = 1; $i <= 30; $i++) {
+            DB::table('orders')->insert(['id' => $i, 'created_at' => sprintf('2026-11-01 05:%02d:10', $i),
+                'total_cents' => 2470, 'payment_status' => 'cash_collected', 'kitchen_status' => 'READY',
+                'seller_id' => 1, 'notes' => 'Observación privada', 'customer_name' => 'Cliente privado']);
+            DB::table('payments')->insert(['order_id' => $i, 'method' => 'CASH', 'status' => 'cash_collected', 'amount_cents' => 2470]);
+        }
+        DB::table('order_items')->insert(['id' => 1, 'order_id' => 3, 'product_id' => 1, 'product_name' => 'Producto histórico', 'quantity' => 2,
+            'unit_price_cents' => 1000, 'line_total_cents' => 2470, 'notes' => 'Nota privada']);
+        DB::table('order_items')->insert(['id' => 2, 'order_id' => 3, 'product_id' => 2, 'product_name' => 'Sin adicionales', 'quantity' => 1,
+            'unit_price_cents' => 0, 'line_total_cents' => 0]);
+        DB::table('order_item_extras')->insert([['order_item_id' => 1, 'name' => 'Extra histórico', 'unit_price_cents' => 200],
+            ['order_item_id' => 1, 'name' => 'Otro extra', 'unit_price_cents' => 35]]);
+        DB::table('order_item_options')->insert(['order_item_id' => 1, 'name' => 'Opción elegida']);
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+        $query = '?period=custom&start_date=2026-11-01&end_date=2026-11-01&page=2&detail=3';
+        $response = $this->call('GET', '/reportes'.$query, server: ['REMOTE_ADDR' => '127.0.0.1'])->assertOk();
+        $this->assertSame([5, 4, 3, 2, 1], $response->viewData('history')->pluck('id')->all());
+        $this->assertSame(30, $response->viewData('history')->total());
+        $this->assertSame(74100, $response->viewData('summary')['total_cents']);
+        $response->assertSee('01/11/2026 01:03:10')->assertSee('Vendedor Uno')->assertSee('Producto histórico')
+            ->assertSee('Bs 10,00')->assertSee('Bs 24,70')->assertSee('Extra histórico')->assertSee('Bs 2,00')
+            ->assertSee('Bs 0,35')->assertSee('Opción elegida')->assertSee('Sin adicionales')
+            ->assertSee('page=2&amp;detail=3', false)->assertSee('end_date=2026-11-01&amp;page=2', false)
+            ->assertDontSee('Cliente privado')->assertDontSee('Observación privada')->assertDontSee('Nota privada');
+        foreach (DB::getQueryLog() as $sql) {
+            $this->assertMatchesRegularExpression('/^\s*select\b/i', $sql['query']);
+        }
+        $first = $this->call('GET', '/reportes?period=custom&start_date=2026-11-01&end_date=2026-11-01', server: ['REMOTE_ADDR' => '127.0.0.1'])->assertOk();
+        $this->assertCount(25, $first->viewData('history'));
+        $this->assertSame(range(30, 6), $first->viewData('history')->pluck('id')->all());
+        $search = $this->call('GET', '/reportes?period=custom&start_date=2026-11-01&end_date=2026-11-01&search=3&detail=3', server: ['REMOTE_ADDR' => '127.0.0.1'])->assertOk();
+        $this->assertSame([3], $search->viewData('history')->pluck('id')->all());
+        $this->assertSame(30, $search->viewData('summary')['order_count']);
+        $this->call('GET', '/reportes?search=abc', server: ['REMOTE_ADDR' => '127.0.0.1'])->assertStatus(422);
+        $this->call('GET', '/reportes?period=yesterday&detail=3', server: ['REMOTE_ADDR' => '127.0.0.1'])->assertOk()->assertSee('Pedido no encontrado');
     }
 }
