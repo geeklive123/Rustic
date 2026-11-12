@@ -14,9 +14,14 @@ class CashShift extends Model
         return $this->hasMany(Payment::class);
     }
 
+    public function orders(): HasMany
+    {
+        return $this->hasMany(Order::class);
+    }
+
     protected function casts(): array
     {
-        return ['opening_cents' => 'integer', 'cash_sales_cents' => 'integer', 'expected_cents' => 'integer',
+        return ['opening_qr_cents' => 'integer', 'close_snapshot' => 'array', 'opening_cents' => 'integer', 'cash_sales_cents' => 'integer', 'expected_cents' => 'integer',
             'counted_cents' => 'integer', 'difference_cents' => 'integer', 'opened_at' => 'datetime', 'closed_at' => 'datetime'];
     }
 }

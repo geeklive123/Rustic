@@ -3,6 +3,7 @@
 require __DIR__.'/bootstrap.php';
 
 use App\Enums\Role;
+use App\Models\CashShift;
 use App\Models\Category;
 use App\Models\Order;
 use App\Models\Payment;
@@ -67,11 +68,17 @@ $users = [User::factory()->create(['role' => Role::Seller, 'is_active' => true])
 $category = Category::create(['name' => 'cash-race-'.$tag, 'is_active' => true]);
 $product = Product::create(['name' => 'cash-race-'.$tag, 'category_id' => $category->id, 'is_active' => true, 'price_cents' => 2500]);
 $service = app(CashShiftService::class);
-$shifts = [];
-foreach ($users as $user) {
-    [$shift] = $service->open($user, ['uuid' => (string) Str::uuid(), 'operation_id' => (string) Str::uuid(), 'opening_cents' => 1000]);
-    $shifts[] = $shift;
+$openA = ['type' => 'open', 'body' => ['uuid' => (string) Str::uuid(), 'operation_id' => (string) Str::uuid(), 'opening_cents' => 1000]];
+$openB = ['type' => 'open', 'body' => ['uuid' => (string) Str::uuid(), 'operation_id' => (string) Str::uuid(), 'opening_cents' => 1000]];
+$result = cashRace([$openA, $openB], [$users[0]->id, $users[1]->id]);
+$codes = array_column($result, 'http');
+sort($codes);
+if ($codes !== [200, 409] || CashShift::whereNull('closed_at')->count() !== 1) {
+    throw new RuntimeException('Concurrent opening did not leave exactly one open shift.');
 }
+$winner = $result[0]['http'] === 200 ? 0 : 1;
+$shift = CashShift::findOrFail($result[$winner]['id']);
+$shifts = [$shift, $shift];
 $orders = [];
 foreach ($shifts as $shift) {
     $orders[] = ['uuid' => (string) Str::uuid(), 'operation_id' => (string) Str::uuid(), 'device_id' => 'cash-race', 'customer_name' => 'Test',
@@ -83,7 +90,7 @@ if (array_column($result, 'http') !== [200, 200] || $result[0]['id'] === $result
     throw new RuntimeException('Two sellers failed.');
 }
 foreach ($shifts as $shift) {
-    if ($service->cashTotal($shift) !== 2500) {
+    if ($service->cashTotal($shift) !== 5000) {
         throw new RuntimeException('Shift payment missing.');
     }
 }
@@ -99,21 +106,22 @@ try {
         throw $e;
     }
 }
-if (Order::where('uuid', $badTotal['uuid'])->exists() || $service->cashTotal($shifts[0]) !== 2500) {
+if (Order::where('uuid', $badTotal['uuid'])->exists() || $service->cashTotal($shifts[0]) !== 5000) {
     throw new RuntimeException('Failed order did not roll back.');
 }
-$close = ['operation_id' => (string) Str::uuid(), 'counted_cents' => 3500];
+$close = ['operation_id' => (string) Str::uuid(), 'counted_cents' => 6000];
 $same = ['type' => 'close', 'id' => $shifts[0]->id, 'body' => $close];
-$result = cashRace([$same, $same], [$users[0]->id, $users[0]->id]);
+$result = cashRace([$same, $same], [$users[$winner]->id, $users[$winner]->id]);
 $replays = array_column($result, 'replayed');
 sort($replays);
-if (array_column($result, 'http') !== [200, 200] || $replays !== [false, true] || array_column($result, 'expected') !== [3500, 3500]) {
+if (array_column($result, 'http') !== [200, 200] || $replays !== [false, true] || array_column($result, 'expected') !== [6000, 6000]) {
     throw new RuntimeException('Concurrent close replay failed.');
 }
-$a = ['type' => 'close', 'id' => $shifts[1]->id, 'body' => ['operation_id' => (string) Str::uuid(), 'counted_cents' => 3500]];
+[$competing] = $service->open($users[0], ['uuid' => (string) Str::uuid(), 'operation_id' => (string) Str::uuid(), 'opening_cents' => 0]);
+$a = ['type' => 'close', 'id' => $competing->id, 'body' => ['operation_id' => (string) Str::uuid(), 'counted_cents' => 0]];
 $b = $a;
 $b['body']['operation_id'] = (string) Str::uuid();
-$result = cashRace([$a, $b], [$users[1]->id, $users[1]->id]);
+$result = cashRace([$a, $b], [$users[0]->id, $users[0]->id]);
 $codes = array_column($result, 'http');
 sort($codes);
 if ($codes !== [200, 409]) {
@@ -125,7 +133,7 @@ $invalid['operation_id'] = (string) Str::uuid();
 $invalid['cash_shift_id'] = $shifts[1]->id;
 try {
     app(OrderService::class)->create($invalid, $users[0]);
-    throw new RuntimeException('Invalid owner was accepted.');
+    throw new RuntimeException('Closed shift was accepted.');
 } catch (HttpException $e) {
     if ($e->getStatusCode() !== 409) {
         throw $e;
@@ -139,7 +147,7 @@ $sale = $orders[0];
 $sale['uuid'] = (string) Str::uuid();
 $sale['operation_id'] = (string) Str::uuid();
 $sale['cash_shift_id'] = $third->id;
-$closeRace = ['type' => 'close', 'id' => $third->id, 'body' => ['operation_id' => (string) Str::uuid(), 'counted_cents' => 1000]];
+$closeRace = ['type' => 'close', 'id' => $third->id, 'body' => ['operation_id' => (string) Str::uuid(), 'counted_cents' => 1000, 'note' => 'Conteo concurrente']];
 $result = cashRace([['type' => 'order', 'body' => $sale], $closeRace], [$users[0]->id, $users[0]->id]);
 $third->refresh();
 if ($result[1]['http'] !== 200 || ! in_array($result[0]['http'], [200, 409], true)
@@ -177,5 +185,6 @@ if (array_column($result, 'http') !== [200, 200] || $created !== [false, true] |
     || Payment::where('order_id', $result[0]['id'])->count() !== 1 || $service->cashTotal($fourth) !== 2500) {
     throw new RuntimeException('Concurrent cash retry duplicated an order or payment.');
 }
+$service->close($users[0], $fourth->id, ['operation_id' => (string) Str::uuid(), 'counted_cents' => 2500]);
 echo "Concurrent cash retry: one order, one payment, 2500 cents in the shift.\n";
 echo "Cash races passed: two sellers, concurrent close replay, competing closes and transaction integrity.\n";

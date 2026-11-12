@@ -20,14 +20,16 @@ class ManualQrPaymentTest extends TestCase
         $order['payment_method'] = 'QR_STATIC';
         $url = '/api/v1/orders/'.$order['uuid'].'/qr-confirmation';
         $confirmation = ['operation_id' => (string) Str::uuid(), 'amount_cents' => 5400, 'reference' => 'comprobante'];
-        $shift = $this->postJson('/api/v1/cash-shifts/open', ['uuid' => (string) Str::uuid(), 'operation_id' => (string) Str::uuid(), 'opening_cents' => 100], $seller)->assertCreated()->json('data.id');
+        $adminShift = $this->tokenFor($this->accountFor(Role::Administrator));
+        $shift = $this->postJson('/api/v1/cash-shifts/open', ['uuid' => (string) Str::uuid(), 'operation_id' => (string) Str::uuid(), 'opening_cents' => 100], $adminShift)->assertCreated()->json('data.id');
+        $this->app['auth']->forgetGuards();
         $this->postJson('/api/v1/orders', $order, $seller)->assertCreated()->assertJsonPath('data.payment.status', 'qr_pending');
         $this->app['auth']->forgetGuards();
         $this->postJson($url, $confirmation)->assertUnauthorized();
         $this->app['auth']->forgetGuards();
         $kitchen = $this->tokenFor($this->accountFor(Role::Kitchen));
         $this->postJson($url, $confirmation, $kitchen)->assertForbidden();
-        $this->getJson('/api/v1/orders/'.$order['uuid'], $kitchen)->assertOk()->assertJsonMissingPath('data.payment')->assertJsonMissingPath('data.total_cents');
+        $this->getJson('/api/v1/orders/'.$order['uuid'], $kitchen)->assertNotFound();
         $this->app['auth']->forgetGuards();
         $other = $this->tokenFor($this->accountFor(Role::Seller));
         $this->postJson($url, $confirmation, $other)->assertNotFound();
@@ -38,7 +40,8 @@ class ManualQrPaymentTest extends TestCase
         $this->postJson($url, array_merge($confirmation, ['reference' => 'otra']), $seller)->assertStatus(409);
         $this->assertDatabaseCount('payments', 1);
         $this->getJson('/api/v1/cash-shifts/current', $seller)->assertOk()->assertJsonPath('data.cash_sales_cents', 0)->assertJsonPath('data.expected_cents', 100);
-        $this->postJson('/api/v1/cash-shifts/'.$shift.'/close', ['operation_id' => (string) Str::uuid(), 'counted_cents' => 100], $seller)->assertOk()->assertJsonPath('data.cash_sales_cents', 0);
+        $this->app['auth']->forgetGuards();
+        $this->postJson('/api/v1/cash-shifts/'.$shift.'/close', ['operation_id' => (string) Str::uuid(), 'counted_cents' => 100], $adminShift)->assertOk()->assertJsonPath('data.cash_sales_cents', 0);
         $this->app['auth']->forgetGuards();
         $admin = $this->tokenFor($this->accountFor(Role::Administrator));
         $this->getJson('/api/v1/reports/summary', $admin)->assertOk()->assertJsonPath('data.verified_qr_count', 1)->assertJsonPath('data.verified_qr_cents', 5400)->assertJsonPath('data.cash_cents', 0)->assertJsonPath('data.unpaid_count', 0);

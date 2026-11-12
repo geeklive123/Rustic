@@ -19,7 +19,10 @@ while (! is_file($barrier.'.go')) {
 }
 try {
     $user = User::findOrFail((int) $userId);
-    if ($data['type'] === 'close') {
+    if ($data['type'] === 'open') {
+        [$shift, $replayed] = app(CashShiftService::class)->open($user, $data['body']);
+        $result = ['http' => 200, 'replayed' => $replayed, 'id' => $shift->id];
+    } elseif ($data['type'] === 'close') {
         [$shift, $replayed] = app(CashShiftService::class)->close($user, $data['id'], $data['body']);
         $result = ['http' => 200, 'replayed' => $replayed, 'expected' => $shift->expected_cents];
     } else {

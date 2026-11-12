@@ -18,4 +18,9 @@ enum KitchenStatus: string
             self::Delivered => null,
         };
     }
+
+    public function canTransitionTo(self $target): bool
+    {
+        return $this->next() === $target || ($this === self::Ready && $target === self::Preparing);
+    }
 }

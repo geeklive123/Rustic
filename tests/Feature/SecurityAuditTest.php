@@ -87,17 +87,17 @@ class SecurityAuditTest extends TestCase
         $this->getJson('/api/v1/me', $headers)->assertStatus(429);
     }
 
-    public function test_cash_order_cannot_use_another_sellers_shift(): void
+    public function test_cash_order_can_use_shared_shift(): void
     {
         [, $product, $extra, $option] = $this->fixture();
-        $owner = $this->tokenFor($this->accountFor(Role::Seller));
+        $owner = $this->tokenFor($this->accountFor(Role::Administrator));
         $id = $this->postJson('/api/v1/cash-shifts/open', ['uuid' => (string) Str::uuid(), 'operation_id' => (string) Str::uuid(), 'opening_cents' => 0], $owner)->assertCreated()->json('data.id');
         $this->app['auth']->forgetGuards();
         $other = $this->tokenFor($this->accountFor(Role::Seller));
         $body = $this->payload($product, $extra, $option);
         $body['cash_shift_id'] = $id;
-        $this->postJson('/api/v1/orders', $body, $other)->assertStatus(409);
-        $this->assertDatabaseCount('orders', 0);
-        $this->assertDatabaseCount('payments', 0);
+        $this->postJson('/api/v1/orders', $body, $other)->assertCreated();
+        $this->assertDatabaseCount('orders', 1);
+        $this->assertDatabaseHas('payments', ['cash_shift_id' => $id, 'status' => 'cash_collected']);
     }
 }

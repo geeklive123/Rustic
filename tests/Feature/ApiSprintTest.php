@@ -141,6 +141,9 @@ class ApiSprintTest extends TestCase
         $this->assertTrue($admin->hasPermission('reports.view'));
         $this->assertTrue($seller->hasPermission('payments.create'));
         $this->assertFalse($seller->hasPermission('users.manage'));
+        $this->assertTrue($kitchen->hasPermission('orders.create'));
+        $this->assertTrue($kitchen->hasPermission('catalog.view'));
+        $this->assertTrue($kitchen->hasPermission('cash.view'));
         $this->assertTrue($kitchen->hasPermission('orders.prepare'));
         $this->assertFalse($kitchen->hasPermission('payments.create'));
         $this->assertFalse($kitchen->hasPermission('reports.view'));

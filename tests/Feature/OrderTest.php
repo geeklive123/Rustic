@@ -107,7 +107,7 @@ class OrderTest extends TestCase
         $this->assertDatabaseCount('order_item_extras', 0);
     }
 
-    public function test_permissions_and_kitchen_response_excludes_nested_financial_fields(): void
+    public function test_sales_history_is_isolated_by_seller(): void
     {
         [, $product, $extra, $option] = $this->fixture();
         $seller = $this->accountFor(Role::Seller);
@@ -120,10 +120,7 @@ class OrderTest extends TestCase
         $this->getJson('/api/v1/orders/'.$data['uuid'], $other)->assertNotFound();
         $this->app['auth']->forgetGuards();
         $kitchen = $this->tokenFor($this->accountFor(Role::Kitchen));
-        $this->postJson('/api/v1/orders', $data, $kitchen)->assertForbidden();
-        $this->getJson('/api/v1/orders/'.$data['uuid'], $kitchen)->assertOk()->assertJsonMissingPath('data.total_cents')
-            ->assertJsonMissingPath('data.payment')->assertJsonMissingPath('data.payment_status')->assertJsonMissingPath('data.items.0.unit_price_cents')
-            ->assertJsonMissingPath('data.items.0.line_total_cents')->assertJsonMissingPath('data.items.0.extras.0.unit_price_cents');
+        $this->getJson('/api/v1/orders/'.$data['uuid'], $kitchen)->assertNotFound();
         $this->app['auth']->forgetGuards();
         $admin = $this->tokenFor($this->accountFor(Role::Administrator));
         $this->getJson('/api/v1/orders/'.$data['uuid'], $admin)->assertOk()->assertJsonPath('data.total_cents', 5400);

@@ -18,7 +18,7 @@ class StoreOrderRequest extends FormRequest
             'uuid' => ['required', 'uuid'], 'operation_id' => ['required', 'uuid'], 'device_id' => ['required', 'string', 'max:100'],
             'customer_name' => ['required', 'string', 'max:150'], 'notes' => ['nullable', 'string', 'max:1000'],
             'payment_method' => ['required', Rule::in(['CASH', 'QR_SIMULATED', 'QR_STATIC', 'UNPAID'])],
-            'cash_shift_id' => ['sometimes', 'required', 'integer', 'min:1', 'prohibited_unless:payment_method,CASH'],
+            'cash_shift_id' => ['sometimes', 'required', 'integer', 'min:1'],
             'expected_total_cents' => ['required', 'integer', 'min:0', 'max:10000000000'],
             'items' => ['required', 'array', 'min:1', 'max:100'],
             'items.*' => ['required', 'array:product_id,quantity,expected_unit_price_cents,extras,option_ids,notes'],

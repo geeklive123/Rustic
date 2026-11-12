@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\Role;
+use App\Models\CashShift;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\User;
@@ -15,8 +16,13 @@ class ManualQrPaymentService
     {
         try {
             return DB::transaction(function () use ($uuid, $data, $actor): array {
+                // Lock the shift before the order, matching sale and close lock order.
+                $shiftId = Order::where('uuid', $uuid)->value('cash_shift_id');
+                if ($shiftId !== null) {
+                    CashShift::whereKey($shiftId)->lockForUpdate()->firstOrFail();
+                }
                 $query = Order::where('uuid', $uuid);
-                if ($actor->role === Role::Seller) {
+                if ($actor->role !== Role::Administrator) {
                     $query->where('seller_id', $actor->id);
                 }
                 $order = $query->lockForUpdate()->firstOrFail();

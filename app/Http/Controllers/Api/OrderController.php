@@ -16,7 +16,7 @@ class OrderController extends Controller
     private function query(Request $request)
     {
         $query = Order::query();
-        if ($request->user()->role === Role::Seller) {
+        if ($request->user()->role !== Role::Administrator) {
             $query->where('seller_id', $request->user()->id);
         }
 

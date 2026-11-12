@@ -54,26 +54,25 @@ class OrderService
     /** @return array{0: Order, 1: bool} */
     public function create(array $data, User $user): array
     {
-        if (isset($data['cash_shift_id']) && $data['payment_method'] !== 'CASH') {
-            $this->invalid('cash_shift_id', 'Solo un pago en efectivo puede vincularse a un turno.');
-        }
         $hash = hash('sha256', json_encode($this->canonicalize($data), JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION));
         if ($order = $this->existing($data, $hash, $user)) {
             return [$order, false];
+        }
+        if (config('cash.require_shift') && ! isset($data['cash_shift_id'])) {
+            abort(409, 'Debe seleccionar una caja abierta para registrar el pedido.');
         }
         try {
             $order = DB::transaction(function () use ($data, $hash, $user): Order {
                 $cashShift = null;
                 if (isset($data['cash_shift_id'])) {
-                    User::whereKey($user->id)->lockForUpdate()->firstOrFail();
-                    $cashShift = CashShift::whereKey($data['cash_shift_id'])->where('user_id', $user->id)->lockForUpdate()->first();
-                    if (! $cashShift || $cashShift->closed_at !== null || (int) $cashShift->active_user_id !== (int) $user->id) {
-                        abort(409, 'El turno de caja no existe, no pertenece al vendedor o esta cerrado.');
+                    $cashShift = CashShift::whereKey($data['cash_shift_id'])->lockForUpdate()->first();
+                    if (! $cashShift || $cashShift->closed_at !== null || (int) $cashShift->active_global !== 1) {
+                        abort(409, 'El turno de caja no existe o esta cerrado.');
                     }
                 }
                 // Reserve both unique keys before reading prices. A competing insert waits on this transaction.
                 $order = Order::create(['uuid' => $data['uuid'], 'operation_id' => $data['operation_id'],
-                    'device_id' => $data['device_id'], 'request_hash' => $hash, 'seller_id' => $user->id,
+                    'device_id' => $data['device_id'], 'request_hash' => $hash, 'seller_id' => $user->id, 'cash_shift_id' => $cashShift?->id,
                     'customer_name' => $data['customer_name'], 'notes' => $data['notes'] ?? null,
                     'total_cents' => 0, 'payment_status' => 'unpaid', 'kitchen_status' => 'NEW']);
                 $productIds = collect($data['items'])->pluck('product_id')->unique()->sort()->values()->all();

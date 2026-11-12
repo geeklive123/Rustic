@@ -41,6 +41,15 @@ class ReportService
                 COALESCE(SUM(CASE WHEN orders.payment_status IN ('unpaid', 'qr_pending') THEN 1 ELSE 0 END),0) AS unpaid_count")
             ->first();
 
-        return array_map('intval', (array) $row);
+        $summary = array_map('intval', (array) $row);
+        $summary['qr_cents'] = $summary['simulated_qr_cents'] + $summary['verified_qr_cents'];
+        $summary['sellers'] = $this->orders($data)->join('users', 'users.id', '=', 'orders.seller_id')
+            ->select('orders.seller_id', 'users.name')
+            ->selectRaw('COUNT(*) AS order_count, COALESCE(SUM(orders.total_cents), 0) AS total_cents')
+            ->groupBy('orders.seller_id', 'users.name')->orderBy('orders.seller_id')->get()
+            ->map(fn ($seller) => ['seller_id' => (int) $seller->seller_id, 'name' => $seller->name,
+                'order_count' => (int) $seller->order_count, 'total_cents' => (int) $seller->total_cents])->all();
+
+        return $summary;
     }
 }
