@@ -21,6 +21,7 @@ class ManualQrPaymentService
                 if ($shiftId !== null) {
                     CashShift::whereKey($shiftId)->lockForUpdate()->firstOrFail();
                 }
+                DB::table('bank_reference_locks')->where('id', 1)->lockForUpdate()->first();
                 $query = Order::where('uuid', $uuid);
                 if ($actor->role !== Role::Administrator) {
                     $query->where('seller_id', $actor->id);
@@ -35,17 +36,21 @@ class ManualQrPaymentService
                         && $payment->amount_cents === (int) $data['amount_cents']
                         && $payment->reference === $reference, 409, 'La confirmacion ya existe con otros datos.');
 
-                    return [$order->load(['items.extras', 'items.options', 'payment']), false];
+                    return [$order->load(['items.extras', 'items.options', 'items.components.extras', 'items.components.options', 'payment']), false];
                 }
                 abort_unless($payment->status === 'qr_pending' && $order->payment_status === 'qr_pending'
                     && $payment->amount_cents === (int) $data['amount_cents']
                     && $order->total_cents === (int) $data['amount_cents'], 409, 'Estado o importe de pago incorrecto.');
+                if ($reference !== null && trim($reference) !== '') {
+                    $referenceHash = hash('sha256', CashMovementService::reference($reference));
+                    abort_if(DB::table('cash_movements')->where('bank_reference_hash', $referenceHash)->lockForUpdate()->first(), 409, 'Referencia bancaria ya utilizada en un movimiento.');
+                }
                 abort_if(Payment::where('confirmation_operation_id', $data['operation_id'])->exists(), 409, 'Operacion de confirmacion ya utilizada.');
                 $payment->update(['status' => 'qr_verified', 'confirmation_operation_id' => $data['operation_id'],
                     'confirmed_by' => $actor->id, 'confirmed_at' => now('UTC'), 'reference' => $reference]);
                 $order->update(['payment_status' => 'qr_verified']);
 
-                return [$order->load(['items.extras', 'items.options', 'payment']), true];
+                return [$order->load(['items.extras', 'items.options', 'items.components.extras', 'items.components.options', 'payment']), true];
             }, 3);
         } catch (QueryException $e) {
             if (in_array((string) $e->getCode(), ['23000', '23505'], true)) {

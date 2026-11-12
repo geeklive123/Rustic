@@ -1,0 +1,84 @@
+@extends('admin.layout') @section('content')
+@php
+    $money = fn ($cents) => 'Bs '.number_format(((int) $cents) / 100, 2, ',', '.');
+    $methods = ['CASH' => 'Efectivo', 'QR_SIMULATED' => 'QR simulado', 'QR_STATIC' => 'QR', 'UNPAID' => 'Sin pagar'];
+    $kitchen = ['NEW' => 'Nuevo', 'PREPARING' => 'En preparación', 'READY' => 'Listo', 'DELIVERED' => 'Entregado'];
+    $statuses = ['cash_collected' => 'Efectivo cobrado', 'simulated' => 'QR simulado', 'qr_verified' => 'QR verificado', 'qr_pending' => 'QR pendiente', 'unpaid' => 'Sin pagar'];
+@endphp
+<main>
+    <header class="report-head"><div><div class="brand">Rustik POS / Reportes</div><h1>Resumen de ventas</h1><div class="sub">@if($summary !== null) {{ $rangeStart->format('d/m/Y') }} al {{ $rangeEnd->format('d/m/Y') }} &middot; Hora de Bolivia @else Seleccione un per&iacute;odo v&aacute;lido @endif</div></div>@if($summary !== null)<a class="refresh" href="{{ route('admin.reports').'?'.http_build_query($filters) }}">&#8635; Actualizar</a>@endif</header>
+    @if($errors->any())<div class="errors" role="alert"><strong>Revise los filtros:</strong><ul>@foreach($errors->all() as $error)<li>{{ $error }}</li>@endforeach</ul></div>@endif
+    <form class="filters panel" method="get" action="{{ route('admin.reports') }}">
+        <div class="field"><label for="period">Per&iacute;odo</label><select id="period" name="period">
+            @foreach(['today' => 'Hoy', 'yesterday' => 'Ayer', 'week' => 'Esta semana', 'month' => 'Este mes', 'custom' => 'Rango personalizado'] as $value => $label)
+            <option value="{{ $value }}" @selected(($filters['period'] ?? 'today') === $value)>{{ $label }}</option>
+            @endforeach
+        </select></div>
+        <div class="field"><label for="start_date">Desde (rango personalizado)</label><input id="start_date" type="date" name="start_date" value="{{ $filters['start_date'] ?? '' }}"></div>
+        <div class="field"><label for="end_date">Hasta (rango personalizado)</label><input id="end_date" type="date" name="end_date" value="{{ $filters['end_date'] ?? '' }}"></div>
+        <div class="field"><label for="search">Número de pedido</label><input id="search" name="search" inputmode="numeric" pattern="[0-9]*" maxlength="20" value="{{ $filters['search'] ?? '' }}"></div>
+        <button class="refresh" type="submit">Consultar</button>
+    </form>
+    @if($summary !== null)
+    @if($summary['reclassified_payment_count'] > 0)<div class="alert">Los métodos efectivos incluyen {{ $summary['reclassified_payment_count'] }} corrección(es) de QR simulado a efectivo por {{ $money($summary['reclassified_payment_cents']) }}. El historial de cada pedido conserva el método anterior.</div>@endif
+    <div class="grid">
+        <section class="card highlight"><div class="label">Total vendido</div><div class="value">{{ $money($summary['total_cents']) }}</div><div class="detail">Valor de los pedidos del per&iacute;odo</div></section>
+        <section class="card"><div class="label">Pedidos</div><div class="value">{{ number_format($summary['order_count'], 0, ',', '.') }}</div><div class="detail">Registrados en el per&iacute;odo</div></section>
+        <section class="card"><div class="label">Efectivo cobrado</div><div class="value">{{ $money($summary['cash_cents']) }}</div><div class="detail">Pagos en efectivo cobrados</div></section>
+        <section class="card"><div class="label">QR_STATIC verificado</div><div class="value">{{ $money($summary['verified_qr_cents']) }}</div><div class="detail">{{ $summary['verified_qr_count'] }} pagos verificados</div></section>
+        <section class="card"><div class="label">QR_SIMULATED</div><div class="value">{{ $money($summary['simulated_qr_cents']) }}</div><span class="tag">Simulado · no es cobro real</span></section>
+        <section class="card"><div class="label">Pedidos con pago pendiente</div><div class="value">{{ $summary['unpaid_count'] }}</div><div class="detail">Sin pagar o QR pendiente</div></section>
+        <section class="card"><div class="label">Producto más vendido</div><div class="value" style="font-size:20px;overflow-wrap:anywhere">{{ $products->first()->product_name ?? 'Sin ventas' }}</div><div class="detail">{{ $products->isNotEmpty() ? $products->first()->quantity.' unidades' : 'Aún no hay productos' }}</div></section>
+    </div>
+    <h2 class="section-title">Actividad del per&iacute;odo</h2>
+    <div class="columns">
+        <section class="panel"><h2>Top 5 productos</h2><p class="muted">Ordenados por unidades vendidas</p>
+            @if($products->isEmpty()) <div class="empty">Todavía no hay productos vendidos en el per&iacute;odo.</div> @else
+            <ol class="ranking">@foreach($products as $product)<li><span class="rank">{{ $loop->iteration }}</span><span class="product">{{ $product->product_name }}</span><strong>{{ $product->quantity }} uds.</strong></li>@endforeach</ol>@endif
+        </section>
+        <section class="panel"><h2>Últimas 10 ventas</h2><p class="muted">Pedidos registrados en el per&iacute;odo</p>
+            @if($sales->isEmpty()) <div class="empty">Todavía no hay ventas registradas en el per&iacute;odo.</div> @else
+            <div class="table-wrap"><table><thead><tr><th>Pedido</th><th>Fecha y hora</th><th>Pago</th><th>Total</th></tr></thead><tbody>@foreach($sales as $sale)<tr><td>#{{ $sale->id }}</td><td>{{ \Carbon\CarbonImmutable::parse($sale->created_at, 'UTC')->setTimezone('America/La_Paz')->format('d/m/Y H:i') }}</td><td>{{ $statuses[$sale->payment_status] ?? $sale->payment_status }}</td><td>{{ $money($sale->total_cents) }}</td></tr>@endforeach</tbody></table></div>@endif
+        </section>
+    </div>
+    <h2 class="section-title" id="pedidos">Todos los pedidos</h2>
+    <section class="panel">
+        <p class="muted">{{ $history->total() }} pedidos encontrados. La búsqueda solo afecta esta lista.</p>
+        @if($history->isEmpty()) <div class="empty">No se encontraron pedidos.</div> @else
+        <div class="table-wrap"><table><thead><tr><th>Pedido</th><th>Fecha y hora</th><th>Método de pago</th><th>Estado del pago</th><th>Cocina</th><th>Total</th><th>Acción</th></tr></thead><tbody>
+        @foreach($history as $order)
+        <tr><td>#{{ $order->id }}</td><td>{{ \Carbon\CarbonImmutable::parse($order->created_at, 'UTC')->setTimezone('America/La_Paz')->format('d/m/Y H:i') }}</td><td>{{ $methods[$order->method] ?? ($order->method ?? 'Sin pago') }}</td><td>{{ $statuses[$order->payment_status] ?? $order->payment_status }}</td><td>{{ $kitchen[$order->kitchen_status] ?? $order->kitchen_status }}</td><td>{{ $money($order->total_cents) }}</td><td><a href="{{ route('admin.reports').'?'.http_build_query(array_merge($filters, ['page' => $history->currentPage(), 'detail' => $order->id])) }}#detalle">Ver detalle</a></td></tr>
+        @endforeach</tbody></table></div>
+        @endif
+        <nav aria-label="Paginación de pedidos" style="display:flex;gap:16px;align-items:center;margin-top:16px">
+            @if($history->onFirstPage()) <span>Anterior</span> @else <a href="{{ $history->previousPageUrl() }}#pedidos">Anterior</a> @endif
+            <span>Página {{ $history->currentPage() }} de {{ $history->lastPage() }}</span>
+            @if($history->hasMorePages()) <a href="{{ $history->nextPageUrl() }}#pedidos">Siguiente</a> @else <span>Siguiente</span> @endif
+        </nav>
+    </section>
+    @if(request()->filled('detail'))
+    <section class="panel" id="detalle" style="margin-top:20px">
+        <a href="{{ route('admin.reports').'?'.http_build_query(array_merge($filters, ['page' => $history->currentPage()])) }}#pedidos">Cerrar detalle</a>
+        @if($detail)
+        <h2>Detalle del pedido #{{ $detail->id }}</h2>
+        <p>{{ \Carbon\CarbonImmutable::parse($detail->created_at, 'UTC')->setTimezone('America/La_Paz')->format('d/m/Y H:i:s') }} · America/La_Paz<br>
+        Vendedor: {{ $detail->seller_name ?? 'No disponible' }}<br>
+        Pago: {{ $methods[$detail->method] ?? ($detail->method ?? 'Sin pago') }} · {{ $statuses[$detail->payment_status] ?? $detail->payment_status }}<br>
+        Cocina: {{ $kitchen[$detail->kitchen_status] ?? $detail->kitchen_status }}</p>
+        @forelse($items as $item)
+        <div style="border-top:1px solid #e6ebe6;padding:12px 0;overflow-wrap:anywhere">
+            <strong>{{ $item->product_name }}</strong><br>
+            {{ $item->quantity }} &times; {{ $money($item->unit_price_cents) }} · Subtotal: {{ $money($item->line_total_cents) }} (incluye extras)
+            @foreach($item->extras as $extra)<div>Extra: {{ $extra->name }} · {{ $money($extra->unit_price_cents) }} por unidad</div>@endforeach
+            @foreach($item->options as $option)<div>Opción: {{ $option->name }}</div>@endforeach
+        </div>
+        @empty <p>Este pedido no tiene productos registrados.</p> @endforelse
+        <strong>Total: {{ $money($detail->total_cents) }}</strong>
+        <p class="muted">Las observaciones no se muestran para proteger los datos personales.</p>
+        @else <p>Pedido no encontrado en el período y la búsqueda seleccionados.</p> @endif
+    </section>
+    @endif
+    <p class="foot">Actualizado a las {{ $now->format('H:i:s') }} · America/La_Paz. El total vendido incluye pedidos pendientes y pagos simulados; no representa únicamente dinero cobrado.</p>
+    @endif
+
+@endsection

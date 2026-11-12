@@ -61,7 +61,7 @@ class CashShiftController extends Controller
     {
         $data = $request->validate(['per_page' => ['sometimes', 'integer', 'min:1', 'max:100']]);
         $shift = CashShift::findOrFail($id);
-        $orders = $shift->orders()->with(['items.extras', 'items.options', 'payment'])->orderByDesc('id')->paginate($data['per_page'] ?? 25);
+        $orders = $shift->orders()->with(['items.extras', 'items.options', 'items.components.extras', 'items.components.options', 'payment'])->orderByDesc('id')->paginate($data['per_page'] ?? 25);
 
         return response()->json(['data' => $orders->getCollection()->map(fn ($order) => (new OrderResource($order))->resolve($request))->all(),
             'meta' => ['current_page' => $orders->currentPage(), 'last_page' => $orders->lastPage(), 'per_page' => $orders->perPage(), 'total' => $orders->total()]]);
@@ -70,7 +70,7 @@ class CashShiftController extends Controller
     public function order(Request $request, int $id, string $uuid): JsonResponse
     {
         $shift = CashShift::findOrFail($id);
-        $order = $shift->orders()->with(['items.extras', 'items.options', 'payment'])->where('uuid', $uuid)->firstOrFail();
+        $order = $shift->orders()->with(['items.extras', 'items.options', 'items.components.extras', 'items.components.options', 'payment'])->where('uuid', $uuid)->firstOrFail();
 
         return response()->json(['data' => (new OrderResource($order))->resolve($request)]);
     }

@@ -9,9 +9,9 @@ use App\Models\CatalogOption;
 use App\Models\Category;
 use App\Models\Extra;
 use App\Models\Product;
+use App\Services\CatalogManager;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 
 class CatalogController extends Controller
 {
@@ -39,7 +39,7 @@ class CatalogController extends Controller
             }
         }
         if ($type === 'products') {
-            $query->with(['extras' => fn ($q) => $includeInactive ? $q : $q->where('extras.is_active', true)]);
+            $query->with(['extras' => fn ($q) => $includeInactive ? $q : $q->where('extras.is_active', true), 'comboComponents' => fn ($q) => $q->where('is_active', true)->with(['extras' => fn ($e) => $e->where('extras.is_active', true), 'options' => fn ($o) => $o->where('catalog_options.is_active', true)])]);
         }
 
         return response()->json(['data' => $this->data($query->orderBy('id')->get(), $request)]);
@@ -58,22 +58,7 @@ class CatalogController extends Controller
 
     public function write(CatalogWriteRequest $request, string $type, ?int $id = null): JsonResponse
     {
-        $model = $this->model($type);
-        $data = $request->validated();
-        $record = DB::transaction(function () use ($model, $type, $id, $data) {
-            $row = $id ? $model::whereKey($id)->lockForUpdate()->firstOrFail() : new $model;
-            $row->fill(collect($data)->except('extra_ids')->all());
-            $row->save();
-            $row->refresh();
-            if ($type === 'products' && array_key_exists('extra_ids', $data)) {
-                $row->extras()->sync($data['extra_ids']);
-            }
-            if ($type === 'products') {
-                $row->load('extras');
-            }
-
-            return $row;
-        });
+        $record = app(CatalogManager::class)->save($type, $id, $request->validated(), $request->user());
 
         return response()->json(['data' => (new CatalogResource($record))->resolve($request)], $id ? 200 : 201);
     }

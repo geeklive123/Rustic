@@ -32,4 +32,29 @@ class AndroidContractTest extends TestCase
         $this->assertDatabaseCount('orders', 1);
         $this->assertDatabaseCount('payments', 1);
     }
+
+    public function test_legacy_android_payment_methods_remain_unlinked_with_an_open_shift(): void
+    {
+        [, $product, $extra, $option] = $this->fixture();
+        config()->set('cash.require_shift', false);
+        $admin = $this->tokenFor($this->accountFor(Role::Administrator));
+        $seller = $this->tokenFor($this->accountFor(Role::Seller));
+        $shift = $this->postJson('/api/v1/cash-shifts/open', [
+            'uuid' => (string) Str::uuid(), 'operation_id' => (string) Str::uuid(), 'opening_cents' => 0,
+        ], $admin)->assertCreated()->json('data.id');
+        $this->app['auth']->forgetGuards();
+        foreach (['CASH' => 'cash_collected', 'QR_SIMULATED' => 'simulated', 'QR_STATIC' => 'qr_pending'] as $method => $status) {
+            $body = $this->payload($product, $extra, $option);
+            $body['payment_method'] = $method;
+            $response = $this->postJson('/api/v1/orders', $body, $seller)->assertCreated()
+                ->assertJsonPath('data.cash_shift_id', null)->assertJsonPath('data.payment.status', $status);
+            $number = $response->json('data.number');
+            $this->postJson('/api/v1/orders', $body, $seller)->assertOk()->assertJsonPath('data.number', $number);
+            $this->getJson('/api/v1/orders/'.$body['uuid'].'/sync-status', $seller)->assertOk()->assertJsonPath('data.number', $number);
+        }
+        $this->assertDatabaseCount('orders', 3);
+        $this->assertDatabaseCount('payments', 3);
+        $this->app['auth']->forgetGuards();
+        $this->getJson('/api/v1/cash-shifts/'.$shift.'/orders', $admin)->assertOk()->assertJsonPath('meta.total', 0);
+    }
 }

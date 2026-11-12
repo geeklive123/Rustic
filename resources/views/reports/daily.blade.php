@@ -31,6 +31,7 @@
         <button class="refresh" type="submit">Consultar</button>
     </form>
     @if($summary !== null)
+    @if($summary['reclassified_payment_count'] > 0)<p>Los métodos efectivos incluyen {{ $summary['reclassified_payment_count'] }} corrección(es) de QR simulado a efectivo por {{ $money($summary['reclassified_payment_cents']) }}.</p>@endif
     <div class="grid">
         <section class="card highlight"><div class="label">Total vendido</div><div class="value">{{ $money($summary['total_cents']) }}</div><div class="detail">Valor de los pedidos del per&iacute;odo</div></section>
         <section class="card"><div class="label">Pedidos</div><div class="value">{{ number_format($summary['order_count'], 0, ',', '.') }}</div><div class="detail">Registrados en el per&iacute;odo</div></section>

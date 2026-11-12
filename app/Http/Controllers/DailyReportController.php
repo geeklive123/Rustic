@@ -14,6 +14,7 @@ class DailyReportController extends Controller
 {
     public function __invoke(Request $request, ReportService $reports): Response
     {
+        $view = $request->routeIs('admin.reports') ? 'admin.reports' : 'reports.daily';
         $validator = Validator::make($request->query(), [
             'search' => ['nullable', 'string', 'regex:/^[0-9]{1,20}$/'],
             'detail' => ['nullable', 'string', 'regex:/^[0-9]{1,20}$/'],
@@ -41,7 +42,7 @@ class DailyReportController extends Controller
                 }
             }
 
-            return response()->view('reports.daily', [
+            return response()->view($view, [
                 'errors' => $validator->errors(), 'now' => $now, 'summary' => null,
                 'filters' => $safeFilters,
             ], 422);
@@ -105,7 +106,7 @@ class DailyReportController extends Controller
             }
         }
 
-        return response()->view('reports.daily', [
+        return response()->view($view, [
             'summary' => $reports->summary($period), 'products' => $products, 'sales' => $sales,
             'history' => $history, 'detail' => $detail, 'items' => $items,
             'now' => $now, 'filters' => $filters, 'rangeStart' => $start->setTimezone('America/La_Paz'),

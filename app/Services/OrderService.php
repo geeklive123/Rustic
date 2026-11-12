@@ -9,6 +9,7 @@ use App\Models\Extra;
 use App\Models\Order;
 use App\Models\Product;
 use App\Models\User;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -37,7 +38,7 @@ class OrderService
                 abort(409, 'La operacion ya existe con datos diferentes o pertenece a otro usuario.');
             }
 
-            return $existing->load(['items.extras', 'items.options', 'payment']);
+            return $existing->load(['items.extras', 'items.options', 'items.components.extras', 'items.components.options', 'payment']);
         }
         if (Order::where('uuid', $data['uuid'])->exists()) {
             abort(409, 'El UUID ya pertenece a otro pedido.');
@@ -76,21 +77,43 @@ class OrderService
                     'customer_name' => $data['customer_name'], 'notes' => $data['notes'] ?? null,
                     'total_cents' => 0, 'payment_status' => 'unpaid', 'kitchen_status' => 'NEW']);
                 $productIds = collect($data['items'])->pluck('product_id')->unique()->sort()->values()->all();
-                $extraIds = collect($data['items'])->flatMap(fn ($line) => collect($line['extras'])->pluck('extra_id'))->unique()->sort()->values()->all();
-                $optionIds = collect($data['items'])->flatMap(fn ($line) => $line['option_ids'])->unique()->sort()->values()->all();
+                $extraIds = collect($data['items'])->flatMap(fn ($line) => collect($line['extras'])->concat(collect($line['components'] ?? [])->flatMap(fn ($part) => $part['extras']))->pluck('extra_id'))->unique()->sort()->values()->all();
+                $optionIds = collect($data['items'])->flatMap(fn ($line) => collect($line['option_ids'])->concat(collect($line['components'] ?? [])->flatMap(fn ($part) => $part['option_ids'])))->unique()->sort()->values()->all();
                 $products = Product::whereIn('id', $productIds)->orderBy('id')->lockForUpdate()->get()->keyBy('id');
                 $categoryIds = $products->pluck('category_id')->unique()->sort()->values()->all();
                 $categories = Category::whereIn('id', $categoryIds)->orderBy('id')->lockForUpdate()->get()->keyBy('id');
                 $extras = Extra::whereIn('id', $extraIds)->orderBy('id')->lockForUpdate()->get()->keyBy('id');
                 $options = CatalogOption::whereIn('id', $optionIds)->orderBy('id')->lockForUpdate()->get()->keyBy('id');
+                $authorizationIds = collect($data['items'])->pluck('price_authorization_id')->filter(fn ($id) => $id !== null)->map(fn ($id) => (int) $id)->all();
+                if (count($authorizationIds) !== count(array_unique($authorizationIds))) {
+                    $this->invalid('items', 'Una autorizaci?n no puede utilizarse en m?s de una l?nea.');
+                }
+                sort($authorizationIds);
+                $authorizations = $authorizationIds === [] ? collect() : DB::table('special_price_authorizations')->whereIn('id', $authorizationIds)->orderBy('id')->lockForUpdate()->get()->keyBy('id');
+                $approverIds = $authorizations->pluck('authorized_by')->unique()->sort()->values()->all();
+                $approvers = $approverIds === [] ? collect() : User::whereIn('id', $approverIds)->orderBy('id')->lockForUpdate()->get()->keyBy('id');
                 $total = 0;
                 foreach ($data['items'] as $index => $line) {
                     $product = $products->get($line['product_id']);
                     if (! $product || ! $product->is_active || ! ($categories->get($product->category_id)?->is_active ?? false)) {
                         $this->invalid("items.$index.product_id", 'Producto inexistente o inactivo.');
                     }
-                    if ((int) $line['expected_unit_price_cents'] !== $product->price_cents) {
-                        abort(409, 'El precio del catalogo cambio; no se registro la venta.');
+                    $unitPrice = $product->price_cents;
+                    $authorization = null;
+                    if (isset($line['price_authorization_id'])) {
+                        $authorization = $authorizations->get((int) $line['price_authorization_id']);
+                        abort_unless($authorization && $authorization->used_at === null
+                            && (int) $authorization->seller_id === (int) $user->id
+                            && (int) $authorization->product_id === (int) $product->id
+                            && (int) $authorization->quantity === (int) $line['quantity']
+                            && $authorization->order_uuid === strtolower($data['uuid'])
+                            && ($approvers->get($authorization->authorized_by)?->hasPermission('menu.manage') ?? false)
+                            && CarbonImmutable::parse($authorization->expires_at, 'UTC')->isAfter(now('UTC'))
+                            && (int) $authorization->normal_cents === $product->price_cents, 409, 'Autorizaci?n de precio inv?lida, vencida o utilizada.');
+                        $unitPrice = (int) $authorization->authorized_cents;
+                    }
+                    if ((int) $line['expected_unit_price_cents'] !== $unitPrice) {
+                        abort(409, 'El precio del catalogo o la autorizaci?n cambi?; no se registro la venta.');
                     }
                     $selectedIds = array_column($line['extras'], 'extra_id');
                     if (count($selectedIds) !== count(array_unique($selectedIds)) || count($line['option_ids']) !== count(array_unique($line['option_ids']))) {
@@ -118,10 +141,88 @@ class OrderService
                         }
                         $selectedOptions[] = $option;
                     }
-                    $lineTotal = app(OrderTotals::class)->line($product->price_cents, $extraPrices, (int) $line['quantity']);
+                    $componentSelections = [];
+                    if (isset($line['components'])) {
+                        if ((int) $line['quantity'] !== 1 || $line['extras'] !== [] || $line['option_ids'] !== []) {
+                            $this->invalid("items.$index.components", 'Los componentes requieren cantidad 1 y extras y opciones de l?nea vac?os.');
+                        }
+                        if (! array_key_exists('combo_revision', $line)) {
+                            $this->invalid("items.$index.combo_revision", 'Se requiere la revisi?n del cat?logo para personalizar.');
+                        }
+                        abort_unless((int) $line['combo_revision'] === (int) $product->combo_revision, 409, 'La composici?n cambi?; actualice el cat?logo.');
+                        foreach ($line['components'] as $componentIndex => $component) {
+                            if (! isset($component['component_id']) || array_key_exists('name', $component)) {
+                                $this->invalid("items.$index.components.$componentIndex", 'Use el identificador del componente del cat?logo.');
+                            }
+                        }
+                        $definitions = $product->comboComponents()->where('is_active', true)->with(['extras', 'options'])->get()->keyBy('id');
+                        if ($definitions->isEmpty()) {
+                            $this->invalid("items.$index.components", 'El producto no tiene composici?n configurada.');
+                        }
+                        $counts = collect($line['components'])->countBy(fn ($component) => (int) $component['component_id']);
+                        foreach ($definitions as $definition) {
+                            if (($counts[$definition->id] ?? 0) !== $definition->quantity) {
+                                $this->invalid("items.$index.components", 'Los componentes no corresponden a las cantidades del cat?logo.');
+                            }
+                        }
+                        if ($counts->keys()->diff($definitions->keys())->isNotEmpty()) {
+                            $this->invalid("items.$index.components", 'El componente no pertenece al producto.');
+                        }
+                        $componentNumbers = [];
+                        foreach ($line['components'] as $componentIndex => $component) {
+                            $definition = $definitions->get((int) $component['component_id']);
+                            if (! $definition->customizable && ($component['extras'] !== [] || $component['option_ids'] !== [] || ! empty($component['notes']))) {
+                                $this->invalid("items.$index.components.$componentIndex", 'Este componente no permite personalizaci?n.');
+                            }
+                            $permittedExtras = $definition->extras->pluck('id')->map(fn ($id) => (int) $id)->all();
+                            $permittedOptions = $definition->options->pluck('id')->map(fn ($id) => (int) $id)->all();
+                            $componentExtras = [];
+                            $componentOptions = [];
+                            $ids = array_column($component['extras'], 'extra_id');
+                            if (count($ids) !== count(array_unique($ids)) || count($component['option_ids']) !== count(array_unique($component['option_ids']))) {
+                                $this->invalid("items.$index.components.$componentIndex", 'No se permiten extras u opciones repetidos en un componente.');
+                            }
+                            foreach ($component['extras'] as $selection) {
+                                $extra = $extras->get($selection['extra_id']);
+                                if (! $extra || ! $extra->is_active || ! in_array((int) $extra->id, $allowed, true) || ! in_array((int) $extra->id, $permittedExtras, true)) {
+                                    $this->invalid("items.$index.components.$componentIndex.extras", 'Extra inexistente, inactivo o no autorizado para el producto.');
+                                }
+                                if ((int) $selection['expected_unit_price_cents'] !== $extra->price_cents) {
+                                    abort(409, 'El precio de un extra cambio; no se registro la venta.');
+                                }
+                                $extraPrices[] = $extra->price_cents;
+                                $componentExtras[] = $extra;
+                            }
+                            foreach ($component['option_ids'] as $optionId) {
+                                $option = $options->get($optionId);
+                                if (! $option || ! $option->is_active || ! in_array((int) $option->id, $permittedOptions, true)) {
+                                    $this->invalid("items.$index.components.$componentIndex.option_ids", 'Opci?n inexistente o inactiva.');
+                                }
+                                $componentOptions[] = $option;
+                            }
+                            $componentNumbers[$definition->id] = ($componentNumbers[$definition->id] ?? 0) + 1;
+                            $name = $definition->name.($definition->quantity > 1 ? ' '.$componentNumbers[$definition->id] : '');
+                            $componentSelections[] = ['data' => $component, 'definition' => $definition, 'name' => $name, 'extras' => $componentExtras, 'options' => $componentOptions];
+                        }
+                    }
+                    $lineTotal = app(OrderTotals::class)->line($unitPrice, $extraPrices, (int) $line['quantity']);
                     $total += $lineTotal;
                     $item = $order->items()->create(['product_id' => $product->id, 'product_name' => $product->name,
-                        'quantity' => $line['quantity'], 'unit_price_cents' => $product->price_cents, 'line_total_cents' => $lineTotal, 'notes' => $line['notes'] ?? null]);
+                        'quantity' => $line['quantity'], 'unit_price_cents' => $unitPrice, 'line_total_cents' => $lineTotal, 'notes' => $line['notes'] ?? null]);
+                    if ($authorization) {
+                        DB::table('special_price_authorizations')->where('id', $authorization->id)->update([
+                            'used_at' => now('UTC'), 'order_id' => $order->id, 'order_item_id' => $item->id,
+                        ]);
+                    }
+                    foreach ($componentSelections as $position => $selection) {
+                        $component = $item->components()->create(['position' => $position + 1, 'name' => $selection['name'], 'catalog_component_id' => $selection['definition']->id, 'notes' => $selection['data']['notes'] ?? null]);
+                        foreach ($selection['extras'] as $extra) {
+                            $component->extras()->create(['extra_id' => $extra->id, 'name' => $extra->name, 'unit_price_cents' => $extra->price_cents]);
+                        }
+                        foreach ($selection['options'] as $option) {
+                            $component->options()->create(['catalog_option_id' => $option->id, 'name' => $option->name]);
+                        }
+                    }
                     foreach ($selected as $extra) {
                         $item->extras()->create(['extra_id' => $extra->id, 'name' => $extra->name, 'unit_price_cents' => $extra->price_cents]);
                     }
@@ -141,7 +242,7 @@ class OrderService
                         'cash_shift_id' => $cashShift?->id]);
                 }
 
-                return $order->load(['items.extras', 'items.options', 'payment']);
+                return $order->load(['items.extras', 'items.options', 'items.components.extras', 'items.components.options', 'payment']);
             }, 3);
 
             return [$order, true];

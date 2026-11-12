@@ -23,7 +23,7 @@ class KitchenController extends Controller
             'after_id' => ['sometimes', 'integer', 'min:0'],
             'timezone' => ['sometimes', 'timezone'], 'per_page' => ['sometimes', 'integer', 'min:1', 'max:100']]);
         $until = isset($data['snapshot_until']) ? Carbon::parse($data['snapshot_until'])->utc() : now('UTC')->startOfSecond();
-        $query = Order::with(['items.extras', 'items.options']);
+        $query = Order::with(['items.extras', 'items.options', 'items.components.extras', 'items.components.options']);
         $query->where('updated_at', '<=', $until);
         if (isset($data['status'])) {
             $query->where('kitchen_status', $data['status']);
@@ -44,7 +44,7 @@ class KitchenController extends Controller
     public function show(Request $request, string $uuid): JsonResponse
     {
         $request->validate(['timezone' => ['sometimes', 'timezone']]);
-        $order = Order::with(['items.extras', 'items.options'])->where('uuid', $uuid)->firstOrFail();
+        $order = Order::with(['items.extras', 'items.options', 'items.components.extras', 'items.components.options'])->where('uuid', $uuid)->firstOrFail();
 
         return response()->json(['data' => (new KitchenOrderResource($order))->resolve($request)]);
     }
@@ -55,7 +55,7 @@ class KitchenController extends Controller
             'status' => ['required', Rule::enum(KitchenStatus::class)], 'operation_id' => ['required', 'uuid'],
             'timezone' => ['sometimes', 'timezone']]);
         [$order, $replayed] = $service->transition($uuid, $data['expected_status'], $data['status'], $data['operation_id'], $request->user());
-        $order->load(['items.extras', 'items.options']);
+        $order->load(['items.extras', 'items.options', 'items.components.extras', 'items.components.options']);
 
         return response()->json(['data' => (new KitchenOrderResource($order))->resolve($request), 'replayed' => $replayed]);
     }

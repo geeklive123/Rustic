@@ -51,9 +51,18 @@ class CashShiftService
         }
         unset($worker);
 
+        $movements = DB::table('cash_movements')->where('cash_shift_id', $shift->id)->get();
+        $inflows = (int) $movements->where('type', 'IN')->sum('amount_cents');
+        $outflows = (int) $movements->whereIn('type', ['OUT', 'TRANSFER'])->sum('amount_cents');
+        $bankIndependent = (int) $movements->where('type', 'TRANSFER')->whereNull('payment_id')->sum('bank_amount_cents');
+        $bankChange = (int) $movements->where('type', 'TRANSFER')->whereNotNull('payment_id')->sum('amount_cents');
+        $bankExtra = $bankIndependent + $bankChange;
+
         return ['order_count' => $orders->count(), 'total_cents' => (int) $orders->sum('total_cents'),
             'methods_cents' => $methods, 'workers' => array_values($workers),
-            'cash_sales_cents' => $this->cashTotal($shift), 'cash_outflows_cents' => 0];
+            'cash_sales_cents' => $this->cashTotal($shift), 'cash_inflows_cents' => $inflows, 'cash_outflows_cents' => $outflows,
+            'bank_extra_cents' => $bankExtra, 'bank_independent_cents' => $bankIndependent, 'bank_linked_change_cents' => $bankChange,
+            'bank_verified_cents' => $methods['QR_STATIC_VERIFIED'] + $bankExtra];
     }
 
     public function open(User $user, array $data): array
@@ -104,11 +113,12 @@ class CashShiftService
                 }
                 abort_if(CashShift::where('close_operation_id', $data['operation_id'])->exists(), 409, 'Operacion de cierre ya utilizada.');
                 $cash = $this->cashTotal($shift, true);
-                $totals = app(CashTotals::class)->calculate($shift->opening_cents, $cash, (int) $data['counted_cents']);
+                $snapshot = $this->summary($shift);
+                $expected = $shift->opening_cents + $cash + $snapshot['cash_inflows_cents'] - $snapshot['cash_outflows_cents'];
+                $totals = ['expected_cents' => $expected, 'difference_cents' => (int) $data['counted_cents'] - $expected];
                 if ($totals['difference_cents'] !== 0 && trim($data['note'] ?? '') === '') {
                     throw ValidationException::withMessages(['note' => ['Se requiere una observacion cuando hay diferencia.']]);
                 }
-                $snapshot = $this->summary($shift);
                 $shift->update(['close_snapshot' => $snapshot, 'close_note' => $data['note'] ?? null, 'active_user_id' => null, 'active_global' => null, 'cash_sales_cents' => $cash, 'expected_cents' => $totals['expected_cents'],
                     'counted_cents' => $data['counted_cents'], 'difference_cents' => $totals['difference_cents'],
                     'close_operation_id' => $data['operation_id'], 'closed_by' => $actor->id, 'closed_at' => now('UTC')]);

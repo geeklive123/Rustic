@@ -25,7 +25,7 @@ class OrderController extends Controller
 
     private function find(Request $request, string $uuid): Order
     {
-        return $this->query($request)->with(['items.extras', 'items.options', 'payment'])->where('uuid', $uuid)->firstOrFail();
+        return $this->query($request)->with(['items.extras', 'items.options', 'items.components.extras', 'items.components.options', 'payment'])->where('uuid', $uuid)->firstOrFail();
     }
 
     public function store(StoreOrderRequest $request, OrderService $service): JsonResponse
@@ -37,7 +37,7 @@ class OrderController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $orders = $this->query($request)->with(['items.extras', 'items.options', 'payment'])->orderByDesc('id')->paginate(25);
+        $orders = $this->query($request)->with(['items.extras', 'items.options', 'items.components.extras', 'items.components.options', 'payment'])->orderByDesc('id')->paginate(25);
 
         return response()->json(['data' => $orders->getCollection()->map(fn ($order) => (new OrderResource($order))->resolve($request))->all(),
             'meta' => ['current_page' => $orders->currentPage(), 'last_page' => $orders->lastPage(), 'per_page' => $orders->perPage(), 'total' => $orders->total()]]);

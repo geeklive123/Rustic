@@ -15,13 +15,24 @@ class OrderResource extends JsonResource
             'created_at' => $this->created_at?->toISOString(), 'updated_at' => $this->updated_at?->toISOString(),
             'items' => $this->items->map(function ($item) {
                 $line = ['product_id' => $item->product_id, 'product_name' => $item->product_name, 'quantity' => $item->quantity,
-                    'notes' => $item->notes, 'extras' => $item->extras->map(function ($extra) {
+                    'notes' => $item->kitchenNotes(), 'extras' => $item->extras->map(function ($extra) {
                         $data = ['id' => $extra->extra_id, 'name' => $extra->name];
                         $data['unit_price_cents'] = $extra->unit_price_cents;
 
                         return $data;
                     })->all(),
                     'options' => $item->options->map(fn ($option) => ['id' => $option->catalog_option_id, 'name' => $option->name])->all()];
+                if ($item->components->isNotEmpty()) {
+                    // Legacy Android reconstructs a line subtotal from unit price and flat extras.
+                    $line['extras'] = $item->components->flatMap(fn ($component) => $component->extras->map(fn ($extra) => [
+                        'id' => $extra->extra_id, 'name' => $extra->name, 'unit_price_cents' => (int) $extra->unit_price_cents,
+                    ]))->values()->all();
+                    $line['components'] = $item->components->map(fn ($component) => [
+                        'position' => $component->position, 'component_id' => $component->catalog_component_id, 'name' => $component->name, 'notes' => $component->notes,
+                        'extras' => $component->extras->map(fn ($extra) => ['id' => $extra->extra_id, 'name' => $extra->name, 'unit_price_cents' => (int) $extra->unit_price_cents])->all(),
+                        'options' => $component->options->map(fn ($option) => ['id' => $option->catalog_option_id, 'name' => $option->name])->all(),
+                    ])->all();
+                }
                 $line['unit_price_cents'] = $item->unit_price_cents;
                 $line['line_total_cents'] = $item->line_total_cents;
 

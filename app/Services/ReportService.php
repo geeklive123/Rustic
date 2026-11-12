@@ -43,6 +43,11 @@ class ReportService
 
         $summary = array_map('intval', (array) $row);
         $summary['qr_cents'] = $summary['simulated_qr_cents'] + $summary['verified_qr_cents'];
+        $corrections = $this->orders($data)->join('order_admin_corrections', 'order_admin_corrections.order_id', '=', 'orders.id')
+            ->where('order_admin_corrections.action', 'payment_reclassification')
+            ->selectRaw('COUNT(*) AS count, COALESCE(SUM(orders.total_cents), 0) AS cents')->first();
+        $summary['reclassified_payment_count'] = (int) $corrections->count;
+        $summary['reclassified_payment_cents'] = (int) $corrections->cents;
         $summary['sellers'] = $this->orders($data)->join('users', 'users.id', '=', 'orders.seller_id')
             ->select('orders.seller_id', 'users.name')
             ->selectRaw('COUNT(*) AS order_count, COALESCE(SUM(orders.total_cents), 0) AS total_cents')

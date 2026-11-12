@@ -14,6 +14,7 @@ class DailyWebReportTest extends TestCase
         // Minimal isolated in-memory schema; no application migrations are run.
         DB::statement('CREATE TABLE orders (id INTEGER PRIMARY KEY, created_at TEXT, total_cents INTEGER, payment_status TEXT, kitchen_status TEXT, seller_id INTEGER, notes TEXT, customer_name TEXT)');
         DB::statement('CREATE TABLE payments (id INTEGER PRIMARY KEY, order_id INTEGER UNIQUE, method TEXT, status TEXT, amount_cents INTEGER)');
+        DB::statement('CREATE TABLE order_admin_corrections (id INTEGER PRIMARY KEY, order_id INTEGER, action TEXT)');
         DB::statement('CREATE TABLE order_items (id INTEGER PRIMARY KEY, order_id INTEGER, product_id INTEGER, product_name TEXT, quantity INTEGER, unit_price_cents INTEGER, line_total_cents INTEGER, notes TEXT)');
         DB::statement('CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)');
         DB::statement('CREATE TABLE order_item_extras (id INTEGER PRIMARY KEY, order_item_id INTEGER, name TEXT, unit_price_cents INTEGER)');

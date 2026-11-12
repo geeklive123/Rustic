@@ -19,11 +19,22 @@ class KitchenOrderResource extends JsonResource
             'elapsed_seconds' => max(0, (int) $this->created_at->diffInSeconds(now('UTC'))),
             'preparing_at' => $this->preparing_at?->toISOString(), 'ready_at' => $this->ready_at?->toISOString(),
             'delivered_at' => $this->delivered_at?->toISOString(),
-            'items' => $this->items->map(fn ($item) => [
-                'product_name' => $item->product_name, 'quantity' => $item->quantity, 'notes' => $item->notes,
-                'extras' => $item->extras->map(fn ($extra) => ['name' => $extra->name])->all(),
-                'options' => $item->options->map(fn ($option) => ['name' => $option->name])->all(),
-            ])->all(),
+            'items' => $this->items->map(function ($item) {
+                $line = [
+                    'product_name' => $item->product_name, 'quantity' => $item->quantity, 'notes' => $item->kitchenNotes(),
+                    'extras' => $item->extras->map(fn ($extra) => ['name' => $extra->name])->all(),
+                    'options' => $item->options->map(fn ($option) => ['name' => $option->name])->all(),
+                ];
+                if ($item->components->isNotEmpty()) {
+                    $line['components'] = $item->components->map(fn ($component) => [
+                        'position' => $component->position, 'component_id' => $component->catalog_component_id, 'name' => $component->name, 'notes' => $component->notes,
+                        'extras' => $component->extras->map(fn ($extra) => ['name' => $extra->name])->all(),
+                        'options' => $component->options->map(fn ($option) => ['name' => $option->name])->all(),
+                    ])->all();
+                }
+
+                return $line;
+            })->all(),
         ];
     }
 }
