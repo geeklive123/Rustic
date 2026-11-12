@@ -39,11 +39,14 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/products', [ReportController::class, 'products']);
             Route::get('/payments', [ReportController::class, 'payments']);
         });
+        Route::get('/cash-shifts/current', [CashShiftController::class, 'current'])->middleware(['permission:cash.view', 'throttle:60,1']);
         Route::middleware(['permission:cash.manage', 'throttle:60,1'])->prefix('cash-shifts')->group(function (): void {
             Route::post('/open', [CashShiftController::class, 'open']);
-            Route::get('/current', [CashShiftController::class, 'current']);
             Route::post('/{id}/close', [CashShiftController::class, 'close'])->whereNumber('id');
             Route::get('/', [CashShiftController::class, 'index']);
+            Route::get('/{id}', [CashShiftController::class, 'show'])->whereNumber('id');
+            Route::get('/{id}/orders', [CashShiftController::class, 'orders'])->whereNumber('id');
+            Route::get('/{id}/orders/{uuid}', [CashShiftController::class, 'order'])->whereNumber('id')->whereUuid('uuid');
         });
         Route::middleware('permission:orders.view')->group(function (): void {
             Route::get('/orders', [OrderController::class, 'index']);

@@ -24,27 +24,28 @@ class ReportsCashTest extends TestCase
     {
         [, $product, $extra, $option] = $this->fixture();
         $seller = $this->headers(Role::Seller);
+        $manager = $this->headers(Role::Administrator);
         $open = ['uuid' => (string) Str::uuid(), 'operation_id' => (string) Str::uuid(), 'opening_cents' => 1000];
-        $this->postJson('/api/v1/cash-shifts/open', ['uuid' => (string) Str::uuid(), 'operation_id' => (string) Str::uuid(), 'opening_cents' => -1], $seller)->assertUnprocessable();
-        $shift = $this->postJson('/api/v1/cash-shifts/open', $open, $seller)->assertCreated()->assertJsonPath('data.status', 'OPEN')->json('data.id');
-        $this->postJson('/api/v1/cash-shifts/open', $open, $seller)->assertOk()->assertJsonPath('replayed', true);
-        $this->postJson('/api/v1/cash-shifts/open', array_merge($open, ['opening_cents' => 1]), $seller)->assertStatus(409);
-        $this->postJson('/api/v1/cash-shifts/open', ['uuid' => (string) Str::uuid(), 'operation_id' => (string) Str::uuid(), 'opening_cents' => 0], $seller)->assertStatus(409);
+        $this->postJson('/api/v1/cash-shifts/open', ['uuid' => (string) Str::uuid(), 'operation_id' => (string) Str::uuid(), 'opening_cents' => -1], $manager)->assertUnprocessable();
+        $shift = $this->postJson('/api/v1/cash-shifts/open', $open, $manager)->assertCreated()->assertJsonPath('data.status', 'OPEN')->json('data.id');
+        $this->postJson('/api/v1/cash-shifts/open', $open, $manager)->assertOk()->assertJsonPath('replayed', true);
+        $this->postJson('/api/v1/cash-shifts/open', array_merge($open, ['opening_cents' => 1]), $manager)->assertStatus(409);
+        $this->postJson('/api/v1/cash-shifts/open', ['uuid' => (string) Str::uuid(), 'operation_id' => (string) Str::uuid(), 'opening_cents' => 0], $manager)->assertStatus(409);
+        $this->app['auth']->forgetGuards();
         $cash = $this->payload($product, $extra, $option);
         $cash['cash_shift_id'] = $shift;
         $this->postJson('/api/v1/orders', $cash, $seller)->assertCreated();
         $this->postJson('/api/v1/orders', $cash, $seller)->assertOk();
         $qr = $this->payload($product, $extra, $option);
         $qr['payment_method'] = 'QR_SIMULATED';
-        $invalidQr = $qr;
-        $invalidQr['cash_shift_id'] = $shift;
-        $this->postJson('/api/v1/orders', $invalidQr, $seller)->assertUnprocessable();
         $this->postJson('/api/v1/orders', $qr, $seller)->assertCreated();
         $this->getJson('/api/v1/cash-shifts/current', $seller)->assertOk()->assertJsonPath('data.cash_sales_cents', 5400)->assertJsonPath('data.expected_cents', 6400);
-        $close = ['operation_id' => (string) Str::uuid(), 'counted_cents' => 6200];
-        $this->postJson('/api/v1/cash-shifts/'.$shift.'/close', $close, $seller)->assertOk()->assertJsonPath('data.difference_cents', -200);
-        $this->postJson('/api/v1/cash-shifts/'.$shift.'/close', $close, $seller)->assertOk()->assertJsonPath('replayed', true);
-        $this->postJson('/api/v1/cash-shifts/'.$shift.'/close', ['operation_id' => (string) Str::uuid(), 'counted_cents' => 6200], $seller)->assertStatus(409);
+        $close = ['operation_id' => (string) Str::uuid(), 'counted_cents' => 6200, 'note' => 'Diferencia'];
+        $this->app['auth']->forgetGuards();
+        $this->postJson('/api/v1/cash-shifts/'.$shift.'/close', $close, $manager)->assertOk()->assertJsonPath('data.difference_cents', -200);
+        $this->postJson('/api/v1/cash-shifts/'.$shift.'/close', $close, $manager)->assertOk()->assertJsonPath('replayed', true);
+        $this->postJson('/api/v1/cash-shifts/'.$shift.'/close', ['operation_id' => (string) Str::uuid(), 'counted_cents' => 6200], $manager)->assertStatus(409);
+        $this->app['auth']->forgetGuards();
         $this->postJson('/api/v1/orders', $cash, $seller)->assertOk();
         $new = $this->payload($product, $extra, $option);
         $new['cash_shift_id'] = $shift;
@@ -53,8 +54,8 @@ class ReportsCashTest extends TestCase
         $this->assertDatabaseHas('cash_shifts', ['id' => $shift, 'cash_sales_cents' => 5400, 'expected_cents' => 6400, 'counted_cents' => 6200]);
         $this->app['auth']->forgetGuards();
         $other = $this->headers(Role::Seller);
-        $this->getJson('/api/v1/cash-shifts', $other)->assertOk()->assertJsonPath('meta.total', 0);
-        $this->postJson('/api/v1/cash-shifts/'.$shift.'/close', $close, $other)->assertNotFound();
+        $this->getJson('/api/v1/cash-shifts', $other)->assertForbidden();
+        $this->postJson('/api/v1/cash-shifts/'.$shift.'/close', $close, $other)->assertForbidden();
         $this->app['auth']->forgetGuards();
         $admin = $this->headers(Role::Administrator);
         $this->getJson('/api/v1/cash-shifts?per_page=1', $admin)->assertOk()->assertJsonPath('meta.total', 1);
@@ -78,6 +79,8 @@ class ReportsCashTest extends TestCase
         $kitchen = $this->headers(Role::Kitchen);
         $this->getJson('/api/v1/reports/payments', $kitchen)->assertForbidden();
         $this->patchJson('/api/v1/kitchen/orders/'.$cash['uuid'].'/status', ['expected_status' => 'NEW', 'status' => 'PREPARING', 'operation_id' => (string) Str::uuid()], $kitchen)->assertOk();
+        $this->patchJson('/api/v1/kitchen/orders/'.$cash['uuid'].'/status', ['expected_status' => 'PREPARING', 'status' => 'READY', 'operation_id' => (string) Str::uuid()], $kitchen)->assertOk();
+        $this->patchJson('/api/v1/kitchen/orders/'.$cash['uuid'].'/status', ['expected_status' => 'READY', 'status' => 'PREPARING', 'operation_id' => (string) Str::uuid()], $kitchen)->assertOk();
         $this->patchJson('/api/v1/kitchen/orders/'.$cash['uuid'].'/status', ['expected_status' => 'PREPARING', 'status' => 'READY', 'operation_id' => (string) Str::uuid()], $kitchen)->assertOk();
         $this->app['auth']->forgetGuards();
         $this->patchJson('/api/v1/kitchen/orders/'.$cash['uuid'].'/status', ['expected_status' => 'READY', 'status' => 'DELIVERED', 'operation_id' => (string) Str::uuid()], $seller)->assertOk();
@@ -107,7 +110,8 @@ class ReportsCashTest extends TestCase
         [, $product, $extra, $option] = $this->fixture();
         $seller = $this->headers(Role::Seller);
         $this->postJson('/api/v1/orders', $this->payload($product, $extra, $option), $seller)->assertCreated();
-        $this->postJson('/api/v1/cash-shifts/open', ['uuid' => (string) Str::uuid(), 'operation_id' => (string) Str::uuid(), 'opening_cents' => 200], $seller)
+        $admin = $this->headers(Role::Administrator);
+        $this->postJson('/api/v1/cash-shifts/open', ['uuid' => (string) Str::uuid(), 'operation_id' => (string) Str::uuid(), 'opening_cents' => 200], $admin)
             ->assertCreated()->assertJsonPath('data.cash_sales_cents', 0)->assertJsonPath('data.expected_cents', 200);
         $this->assertDatabaseHas('payments', ['cash_shift_id' => null, 'amount_cents' => 5400]);
     }

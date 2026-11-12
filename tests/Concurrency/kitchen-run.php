@@ -91,6 +91,18 @@ $results = kitchenRace([$stale, $stale], [$first->id, $first->id]);
 if (array_column($results, 'http') !== [409, 409] || DB::table('order_status_events')->where('order_id', $order->id)->count() !== 2 || $order->fresh()->kitchen_status !== 'READY') {
     throw new RuntimeException('Stale transitions changed the order or audit.');
 }
+$reopen = ['uuid' => $order->uuid, 'expected' => 'READY', 'status' => 'PREPARING', 'operation' => (string) Str::uuid()];
+$otherReopen = $reopen;
+$otherReopen['operation'] = (string) Str::uuid();
+$results = kitchenRace([$reopen, $otherReopen], [$first->id, $second->id]);
+$codes = array_column($results, 'http');
+sort($codes);
+if ($codes !== [200, 409] || $order->fresh()->kitchen_status !== 'PREPARING'
+    || $order->fresh()->ready_at !== null || DB::table('order_status_events')->where('order_id', $order->id)->count() !== 3
+    || DB::table('order_status_events')->where('order_id', $order->id)->where('previous_status', 'READY')->where('new_status', 'PREPARING')->count() !== 1) {
+    throw new RuntimeException('Concurrent reopening failed.');
+}
+echo "Concurrent reopening passed: one success, one stale conflict.\n";
 $data['uuid'] = (string) Str::uuid();
 $data['operation_id'] = (string) Str::uuid();
 [$order2] = app(OrderService::class)->create($data, $seller);

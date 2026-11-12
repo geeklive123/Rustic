@@ -42,7 +42,7 @@ class KitchenService
                 if ($order->kitchen_status !== $expected) {
                     abort(409, 'El estado anterior esta desactualizado.');
                 }
-                if (KitchenStatus::from($expected)->next() !== $target) {
+                if (! KitchenStatus::from($expected)->canTransitionTo($target)) {
                     throw ValidationException::withMessages(['status' => ['Transicion de cocina invalida.']]);
                 }
                 $now = now('UTC');
@@ -52,7 +52,11 @@ class KitchenService
                     KitchenStatus::Delivered => 'delivered_at',
                     default => throw new \LogicException('Invalid target'),
                 };
-                $order->update(['kitchen_status' => $target->value, $field => $now]);
+                $changes = ['kitchen_status' => $target->value, $field => $now];
+                if ($expected === KitchenStatus::Ready->value && $target === KitchenStatus::Preparing) {
+                    $changes['ready_at'] = null;
+                }
+                $order->update($changes);
                 DB::table('order_status_events')->insert(['order_id' => $order->id, 'order_uuid' => $order->uuid,
                     'previous_status' => $expected, 'new_status' => $target->value, 'user_id' => $user->id,
                     'operation_id' => $operation, 'created_at' => $now]);

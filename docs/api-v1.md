@@ -31,12 +31,15 @@ Ejemplo de login:
 
 | Permiso | Administrador | Vendedor | Cocina |
 |---|:---:|:---:|:---:|
-| `users.manage` | S? | ? | ? |
-| `menu.manage`, `settings.manage`, `reports.view` | S? | ? | ? |
-| `orders.create`, `payments.create`, `preparation.view`, `orders.deliver` | ? | S? | ? |
-| `orders.receive`, `tickets.view`, `orders.prepare`, `orders.ready` | ? | ? | S? |
+| `users.manage`, `menu.manage`, `settings.manage`, `reports.view` | Si | No | No |
+| `orders.create` | No | Si | Si |
+| `payments.create`, `orders.deliver` | Si | Si | No |
+| `cash.manage` | Si | No | No |
+| `cash.view`, `catalog.view`, `orders.view`, `preparation.view` | Si | Si | Si |
+| `orders.prepare`, `orders.ready`, `kitchen.view` | Si | No | Si |
+| `orders.receive`, `tickets.view` | No | No | Si |
 
-Los permisos son comprobados en el servidor para las rutas implementadas; la lista enviada al cliente solo sirve para presentar la interfaz. La matriz anterior describe los permisos originales y las rutas de pedidos y cocina se detallan mas abajo.
+Los permisos se comprueban en el servidor; la lista enviada al cliente sirve para presentar la interfaz.
 
 ## Puesta en marcha local
 
@@ -130,10 +133,12 @@ Todos los endpoints siguientes requieren token Sanctum activo. Cocina y administ
 
 * `GET /api/v1/kitchen/orders`: filtros opcionales `status` (`NEW`, `PREPARING`, `READY`, `DELIVERED`), `updated_since` (ISO 8601 con zona), `timezone` (IANA; por defecto `America/La_Paz`), `per_page` (1–100), `after_id` y `snapshot_until`.
 * `GET /api/v1/kitchen/orders/{uuid}`: detalle de preparacion.
-* `PATCH /api/v1/kitchen/orders/{uuid}/status`: JSON con `expected_status`, `status` y `operation_id` (UUID obligatorio). La cocina o el administrador llevan `NEW` a `PREPARING` y `PREPARING` a `READY`; el vendedor propietario o administrador llevan `READY` a `DELIVERED`.
+* `PATCH /api/v1/kitchen/orders/{uuid}/status`: JSON con `expected_status`, `status` y `operation_id` (UUID obligatorio). La cocina o el administrador llevan `NEW` a `PREPARING` y `PREPARING` a `READY`, y pueden reabrir `READY` a `PREPARING` con `orders.prepare`; el vendedor propietario o administrador llevan `READY` a `DELIVERED`.
 * `GET /api/v1/orders/{uuid}/status`: estado de preparacion, sin informacion financiera.
 
-La transicion devuelve `200` con `replayed: false`; repetir exactamente la misma operacion por el mismo usuario devuelve `200` y `replayed: true` sin un evento adicional. Una operacion reutilizada con otros datos o un estado anterior desactualizado devuelve `409`. Un salto, retroceso, estado final repetido con nueva operacion o dato invalido devuelve `422`; sin token devuelve `401`, sin permiso `403` y un pedido inexistente o ajeno al vendedor `404`. El reintento devuelve el estado actual del pedido, que podria haber avanzado desde la operacion original.
+La transicion devuelve `200` con `replayed: false`; repetir exactamente la misma operacion por el mismo usuario devuelve `200` y `replayed: true` sin un evento adicional. Una operacion reutilizada con otros datos o un estado anterior desactualizado devuelve `409`. Una transicion no permitida, estado final repetido con nueva operacion o dato invalido devuelve `422`; sin token devuelve `401`, sin permiso `403` y un pedido inexistente o ajeno al vendedor `404`. El reintento devuelve el estado actual del pedido, que podria haber avanzado desde la operacion original.
+
+Ejemplo de reapertura: `{"expected_status":"READY","status":"PREPARING","operation_id":"4a376b0b-4677-4a98-9bb4-7ae26a1777b0"}`. Esta accion no cancela ni modifica la venta o el pago. Al reabrir, `preparing_at` se actualiza a la fecha UTC de la nueva preparacion y `ready_at` se limpia; los eventos conservan las fechas anteriores. Un pedido `DELIVERED` no se puede reabrir y su `delivered_at` no se modifica.
 
 Cada transicion exitosa guarda usuario, estados, pedido, operacion y fecha UTC en `order_status_events`, en la misma transaccion que el pedido. Los tiempos de preparacion, listo y entrega se guardan en UTC; `created_at_display` usa la zona solicitada. Los pedidos antiguos `pending` se convierten a `NEW` sin crear eventos historicos.
 
@@ -143,13 +148,17 @@ Para las carreras de cocina en la base aislada documentada arriba, despues de ve
 
 ## Reportes y caja (Sprint 2.0D)
 
-Todas estas rutas requieren Sanctum y verificacion de permiso en servidor. `reports.view` corresponde al administrador; `cash.manage` corresponde al administrador y vendedor. Cocina no tiene permisos financieros. El vendedor solo puede consultar y cerrar sus propios turnos; el administrador puede listar y cerrar cualquier turno. `current` consulta el turno propio.
+La politica actual de turnos compartidos y sus contratos estan en [caja web](caja-web-turnos.md); reemplazan las instrucciones de caja historicas de esta seccion.
+
+Todas estas rutas requieren Sanctum y verificacion de permiso en servidor. `reports.view` corresponde al administrador; `cash.manage` corresponde al administrador. Cocina puede consultar la caja compartida actual y sus propias ventas, pero no administrar turnos, consultar reportes ni confirmar pagos. Solo el administrador puede abrir, listar y cerrar turnos.
 
 * `GET /api/v1/reports/summary`, `/reports/sales`, `/reports/products`, `/reports/payments`: requieren `reports.view`. Aceptan `period=today|yesterday|week|month|custom` (por defecto `today`); para `custom`, `start_date` y `end_date` son fechas inclusivas `YYYY-MM-DD`. Los listados aceptan `page` y `per_page` de 1 a 100. Los limites usan `America/La_Paz` y consultas UTC con fin exclusivo.
 * `POST /api/v1/cash-shifts/open`: requiere `cash.manage`. Cuerpo: `{"uuid":"4a376b0b-4677-4a98-9bb4-7ae26a1777b0","operation_id":"3a4341b9-1418-4744-b9f2-c9bb83f47420","opening_cents":1000}`. Devuelve `201`, o `200` con `replayed: true` al repetir los mismos datos por el mismo usuario.
-* `GET /api/v1/cash-shifts/current` devuelve el turno abierto propio o `data: null`. `GET /api/v1/cash-shifts` lista historial con paginacion; administrador ve todos, vendedor solo los propios.
+* `GET /api/v1/cash-shifts/current` requiere `cash.view` y devuelve el turno compartido abierto o `data: null`. `GET /api/v1/cash-shifts` lista historial con paginacion para administradores.
 * `POST /api/v1/cash-shifts/{id}/close`: cuerpo `{"operation_id":"fd92052f-431f-48c1-9203-f13b016294fb","counted_cents":6200}`. Reintentar con el mismo usuario, operacion e importe devuelve `200` y `replayed: true`; otra operacion sobre turno cerrado devuelve `409`.
 
-En un pedido `CASH`, `cash_shift_id` es un campo entero opcional que vincula el pago al turno abierto del vendedor autenticado; no se admite para QR o pedidos sin pago. La operacion de pedido queda ligada a ese campo para la idempotencia. Si se omite, el pedido se registra normalmente pero no se atribuye a ninguna caja. Esto conserva compatibilidad con Android 2.1A, cuyo contrato no envia turno, y evita asignar erroneamente ventas offline o historicas. Un turno inexistente, ajeno o cerrado devuelve `409`. El cierre serializa las ventas asociadas y congela efectivo, esperado, contado y diferencia en centavos.
+En un pedido `CASH`, `cash_shift_id` es un campo entero opcional que vincula el pedido al turno compartido abierto, para todos los metodos de pago. La operacion de pedido queda ligada a ese campo para la idempotencia. Si se omite, el pedido se registra normalmente pero no se atribuye a ninguna caja. Esto conserva compatibilidad con Android 2.1A, cuyo contrato no envia turno, y evita asignar erroneamente ventas offline o historicas. Un turno inexistente o cerrado devuelve `409`. El cierre serializa las ventas asociadas y congela efectivo, esperado, contado y diferencia en centavos.
 
 Ver [reportes](reports.md) y [caja](cash.md) para reglas contables y pruebas. No se han implementado anulaciones, devoluciones, costos ni ganancia; QR simulado no es dinero bancario ni efectivo.
+
+Las consultas `GET /orders`, `GET /orders/{uuid}`, `GET /orders/{uuid}/status` y `GET /orders/{uuid}/sync-status` se limitan a ventas propias para vendedor y cocina; el administrador puede consultar todas. La cola `/kitchen/orders` sigue mostrando los datos de preparaci?n de todos los pedidos sin importes. Cocina puede crear QR est?tico pendiente, pero no tiene `payments.create`: solo un administrador puede confirmar un QR creado por cocina.

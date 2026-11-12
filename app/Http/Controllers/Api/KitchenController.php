@@ -63,7 +63,7 @@ class KitchenController extends Controller
     public function status(Request $request, string $uuid): JsonResponse
     {
         $query = Order::where('uuid', $uuid);
-        if ($request->user()->role === Role::Seller) {
+        if ($request->user()->role !== Role::Administrator) {
             $query->where('seller_id', $request->user()->id);
         }
         $order = $query->firstOrFail();

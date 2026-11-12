@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\Role;
 use App\Models\Order;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\Concerns\CatalogFixtures;
@@ -62,6 +63,51 @@ class KitchenTest extends TestCase
         $this->app['auth']->forgetGuards();
         $this->getJson('/api/v1/orders/'.$uuid.'/status', $sellerHeaders)->assertOk()->assertJsonPath('data.kitchen_status', 'DELIVERED');
         $this->getJson('/api/v1/orders/'.$uuid, $sellerHeaders)->assertOk();
+    }
+
+    public function test_reopening_preserves_audit_and_financial_data(): void
+    {
+        [$uuid, , $seller, $kitchen, $headers] = $this->setupOrder();
+        $this->travelTo(Carbon::parse('2026-01-01 12:00:00', 'UTC'));
+        $this->change($uuid, $headers, 'NEW', 'PREPARING')->assertOk();
+        $this->travel(1)->minutes();
+        $this->change($uuid, $headers, 'PREPARING', 'READY')->assertOk();
+        $order = Order::where('uuid', $uuid)->firstOrFail();
+        $before = $order->only(['total_cents', 'payment_status', 'delivered_at']);
+        $payment = DB::table('payments')->where('order_id', $order->id)->first();
+        $this->travel(1)->minutes();
+        $operation = (string) Str::uuid();
+        $this->change($uuid, $seller, 'READY', 'PREPARING')->assertForbidden();
+        $this->change($uuid, $headers, 'READY', 'PREPARING', $operation)->assertOk()->assertJsonPath('replayed', false)->assertJsonPath('data.kitchen_status', 'PREPARING');
+        $order->refresh();
+        $this->assertSame('2026-01-01 12:02:00', $order->preparing_at->utc()->format('Y-m-d H:i:s'));
+        $this->assertNull($order->ready_at);
+        $this->assertSame($before, $order->only(['total_cents', 'payment_status', 'delivered_at']));
+        $this->assertEquals($payment, DB::table('payments')->where('order_id', $order->id)->first());
+        $this->assertDatabaseCount('orders', 1);
+        $this->assertDatabaseHas('order_status_events', ['order_id' => $order->id, 'user_id' => $kitchen->id,
+            'previous_status' => 'READY', 'new_status' => 'PREPARING', 'operation_id' => $operation, 'created_at' => '2026-01-01 12:02:00']);
+        $this->change($uuid, $headers, 'READY', 'PREPARING', $operation)->assertOk()->assertJsonPath('replayed', true);
+        $this->change($uuid, $headers, 'PREPARING', 'READY', $operation)->assertStatus(409);
+        $this->change($uuid, $headers, 'READY', 'PREPARING')->assertStatus(409);
+        $this->travel(1)->minutes();
+        $this->change($uuid, $headers, 'PREPARING', 'READY')->assertOk();
+        $this->assertSame('2026-01-01 12:03:00', $order->fresh()->ready_at->utc()->format('Y-m-d H:i:s'));
+        $this->assertDatabaseCount('order_status_events', 4);
+        $this->change($uuid, $seller, 'READY', 'DELIVERED')->assertOk();
+        $deliveredAt = $order->fresh()->delivered_at->toISOString();
+        $this->change($uuid, $headers, 'DELIVERED', 'PREPARING')->assertUnprocessable();
+        $this->assertSame($deliveredAt, $order->fresh()->delivered_at->toISOString());
+        $this->travelBack();
+    }
+
+    public function test_administrator_can_reopen_ready_order(): void
+    {
+        [$uuid, , , , $headers] = $this->setupOrder();
+        $this->change($uuid, $headers, 'NEW', 'PREPARING')->assertOk();
+        $this->change($uuid, $headers, 'PREPARING', 'READY')->assertOk();
+        $admin = $this->tokenFor($this->accountFor(Role::Administrator));
+        $this->change($uuid, $admin, 'READY', 'PREPARING')->assertOk()->assertJsonPath('data.kitchen_status', 'PREPARING');
     }
 
     public function test_queue_filters_pagination_and_no_financial_information(): void

@@ -13,6 +13,6 @@ class CloseCashShiftRequest extends FormRequest
 
     public function rules(): array
     {
-        return ['operation_id' => ['required', 'uuid'], 'counted_cents' => ['required', 'integer', 'min:0', 'max:10000000000']];
+        return ['operation_id' => ['required', 'uuid'], 'counted_cents' => ['required', 'integer', 'min:0', 'max:10000000000'], 'note' => ['nullable', 'string', 'max:2000']];
     }
 }

@@ -14,4 +14,11 @@ class KitchenStatusTest extends TestCase
         $this->assertSame(KitchenStatus::Delivered, KitchenStatus::Ready->next());
         $this->assertNull(KitchenStatus::Delivered->next());
     }
+
+    public function test_ready_can_be_reopened_and_delivered_cannot(): void
+    {
+        $this->assertTrue(KitchenStatus::Ready->canTransitionTo(KitchenStatus::Preparing));
+        $this->assertTrue(KitchenStatus::Ready->canTransitionTo(KitchenStatus::Delivered));
+        $this->assertFalse(KitchenStatus::Delivered->canTransitionTo(KitchenStatus::Preparing));
+    }
 }
