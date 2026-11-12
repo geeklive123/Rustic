@@ -4,7 +4,7 @@ Este documento es una preparación; no autoriza despliegue, push ni modificacion
 
 ## Alcance
 
-La rama incluye API de ventas, Cocina, catálogo, combos, precios especiales, Caja Compartida, caja y administración web, reportes, movimientos y confirmación manual QR. El vendedor puede confirmar QR_STATIC propio tras comprobar el abono real; administrador conserva sus permisos y Cocina no obtiene confirmación QR. La operación no verifica el banco automáticamente. No modificar este contrato de permisos para este release.
+La rama incluye API de ventas, Cocina, catálogo, combos, precios especiales, Caja Compartida, caja y administración web, reportes, movimientos y confirmación manual QR. Vendedor y Cocina pueden confirmar QR_STATIC propio tras comprobar el abono real; el administrador conserva sus permisos. Ninguno adquiere `cash.manage`. La operación no verifica el banco automáticamente.
 
 Persisten bloqueadas las anulaciones, devoluciones, correcciones financieras generales, correcciones de pago sobre caja cerrada y compensaciones de transferencias o pagos. Solo se compensan entradas o salidas completas y la corrección de pago se limita a QR simulado → efectivo con caja abierta o sin caja. Las pruebas no sustituyen revisión financiera y operativa.
 

@@ -33,7 +33,8 @@ Ejemplo de login:
 |---|:---:|:---:|:---:|
 | `users.manage`, `menu.manage`, `settings.manage`, `reports.view` | Si | No | No |
 | `orders.create` | No | Si | Si |
-| `payments.create`, `orders.deliver` | Si | Si | No |
+| `payments.create` | Si | Si | Si |
+| `orders.deliver` | Si | Si | No |
 | `cash.manage` | Si | No | No |
 | `cash.view`, `catalog.view`, `orders.view`, `preparation.view` | Si | Si | Si |
 | `orders.prepare`, `orders.ready`, `kitchen.view` | Si | No | Si |
@@ -161,4 +162,4 @@ En un pedido `CASH`, `cash_shift_id` es un campo entero opcional que vincula el 
 
 Ver [reportes](reports.md) y [caja](cash.md) para reglas contables y pruebas. No se han implementado anulaciones, devoluciones, costos ni ganancia; QR simulado no es dinero bancario ni efectivo.
 
-Las consultas `GET /orders`, `GET /orders/{uuid}`, `GET /orders/{uuid}/status` y `GET /orders/{uuid}/sync-status` se limitan a ventas propias para vendedor y cocina; el administrador puede consultar todas. La cola `/kitchen/orders` sigue mostrando los datos de preparaci?n de todos los pedidos sin importes. Cocina puede crear QR est?tico pendiente, pero no tiene `payments.create`: solo un administrador puede confirmar un QR creado por cocina.
+Las consultas `GET /orders`, `GET /orders/{uuid}`, `GET /orders/{uuid}/status` y `GET /orders/{uuid}/sync-status` se limitan a ventas propias para vendedor y cocina; el administrador puede consultar todas. La cola `/kitchen/orders` sigue mostrando los datos de preparaci?n de todos los pedidos sin importes. Vendedor y Cocina pueden confirmar manualmente QR_STATIC de sus propios pedidos tras comprobar el abono real; el administrador puede confirmar cualquier pedido. No existe verificación bancaria automática.

@@ -6,7 +6,7 @@ El cliente presenta su propio QR est?tico fuera de esta API. No hay consulta ban
 
 `POST /api/v1/orders` conserva su contrato; enviar `payment_method: "QR_STATIC"` crea un pago por el total calculado, con `payment.status` y `payment_status` iguales a `qr_pending`. La creaci?n no acredita el pago. Los m?todos `CASH`, `QR_SIMULATED` y `UNPAID` permanecen iguales. Un QR no acepta `cash_shift_id`.
 
-`POST /api/v1/orders/{uuid}/qr-confirmation` requiere bearer Sanctum y permiso `payments.create`: vendedor para sus propios pedidos, administrador para cualquier pedido. Cocina no tiene acceso. Ejemplo:
+`POST /api/v1/orders/{uuid}/qr-confirmation` requiere bearer Sanctum y permiso `payments.create`: Vendedor y Cocina para sus propios pedidos, administrador para cualquier pedido. Cada trabajador debe comprobar el abono real antes de confirmar; no existe verificación bancaria automática. Ejemplo:
 
 ```json
 {"operation_id":"7e785a56-f4aa-4b1d-84b0-2baa2cd74429","amount_cents":5400,"reference":"Comprobante 123"}

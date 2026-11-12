@@ -28,7 +28,7 @@ class ManualQrPaymentTest extends TestCase
         $this->postJson($url, $confirmation)->assertUnauthorized();
         $this->app['auth']->forgetGuards();
         $kitchen = $this->tokenFor($this->accountFor(Role::Kitchen));
-        $this->postJson($url, $confirmation, $kitchen)->assertForbidden();
+        $this->postJson($url, $confirmation, $kitchen)->assertNotFound();
         $this->getJson('/api/v1/orders/'.$order['uuid'], $kitchen)->assertNotFound();
         $this->app['auth']->forgetGuards();
         $other = $this->tokenFor($this->accountFor(Role::Seller));

@@ -60,7 +60,12 @@ function race(array $payloads, int $sellerId): array
 }
 
 $tag = (string) Str::uuid();
-$seller = User::factory()->create(['role' => Role::Seller, 'is_active' => true]);
+$role = match ($argv[1] ?? 'seller') {
+    'seller' => Role::Seller,
+    'kitchen' => Role::Kitchen,
+    default => throw new InvalidArgumentException('Expected seller or kitchen.'),
+};
+$seller = User::factory()->create(['role' => $role, 'is_active' => true]);
 $category = Category::create(['name' => 'qr-race-'.$tag, 'is_active' => true]);
 $product = Product::create(['name' => 'qr-race-'.$tag, 'category_id' => $category->id, 'is_active' => true, 'price_cents' => 2500]);
 $make = function () use ($seller, $product) {
@@ -96,4 +101,4 @@ sort($statuses);
 if ($statuses !== [200, 409] || Payment::where('confirmation_operation_id', $a['operation_id'])->count() !== 1) {
     throw new RuntimeException('Concurrent operation reuse failed: '.json_encode($results));
 }
-echo "Manual QR concurrency checks passed.\n";
+echo "Manual QR concurrency checks passed for {$role->value}.\n";
