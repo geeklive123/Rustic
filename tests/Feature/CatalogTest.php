@@ -23,11 +23,23 @@ class CatalogTest extends TestCase
         $this->getJson('/api/v1/categories', $headers)->assertOk()->assertJsonPath('data.0.name', 'Hamburguesas');
     }
 
-    public function test_kitchen_receives_no_catalog_prices(): void
+    public function test_kitchen_receives_catalog_prices(): void
     {
-        $this->fixture();
-        $headers = $this->tokenFor($this->accountFor(Role::Kitchen));
-        $this->getJson('/api/v1/catalog', $headers)->assertOk()->assertJsonMissingPath('data.products.0.price_cents')->assertJsonMissingPath('data.extras.0.price_cents');
+        [, $product, $extra, $option] = $this->fixture();
+        $component = $product->comboComponents()->create(['name' => 'Hamburguesa', 'quantity' => 2, 'customizable' => true, 'is_active' => true]);
+        $component->extras()->attach($extra);
+        $component->options()->attach($option);
+        foreach ([Role::Kitchen, Role::Seller] as $role) {
+            $this->app['auth']->forgetGuards();
+            $headers = $this->tokenFor($this->accountFor($role));
+            $this->getJson('/api/v1/catalog', $headers)->assertOk()->assertJsonPath('data.products.0.price_cents', 2500)->assertJsonPath('data.extras.0.price_cents', 200)
+                ->assertJsonPath('data.categories.0.name', 'Hamburguesas')->assertJsonPath('data.options.0.name', 'Con llajua')
+                ->assertJsonPath('data.products.0.combo_components.0.id', $component->id)
+                ->assertJsonPath('data.products.0.combo_components.0.extra_ids.0', $extra->id)
+                ->assertJsonPath('data.products.0.combo_components.0.option_ids.0', $option->id);
+            $this->getJson('/api/v1/catalog', $headers)->assertOk()->assertJsonPath('data.products.0.price_cents', 2500);
+            $this->getJson('/api/v1/extras', $headers)->assertOk()->assertJsonPath('data.0.price_cents', 200);
+        }
     }
 
     public function test_only_admin_can_change_catalog_and_negative_price_is_rejected(): void

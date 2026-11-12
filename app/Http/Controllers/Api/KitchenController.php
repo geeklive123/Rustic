@@ -20,11 +20,14 @@ class KitchenController extends Controller
         $iso = ['date', 'regex:/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/'];
         $data = $request->validate(['status' => ['sometimes', Rule::enum(KitchenStatus::class)],
             'updated_since' => ['sometimes', ...$iso], 'snapshot_until' => ['sometimes', ...$iso],
-            'after_id' => ['sometimes', 'integer', 'min:0'],
+            'after_id' => ['sometimes', 'integer', 'min:0'], 'cash_shift_id' => ['sometimes', 'required', 'integer', 'min:1'],
             'timezone' => ['sometimes', 'timezone'], 'per_page' => ['sometimes', 'integer', 'min:1', 'max:100']]);
         $until = isset($data['snapshot_until']) ? Carbon::parse($data['snapshot_until'])->utc() : now('UTC')->startOfSecond();
         $query = Order::with(['items.extras', 'items.options', 'items.components.extras', 'items.components.options']);
         $query->where('updated_at', '<=', $until);
+        if (isset($data['cash_shift_id'])) {
+            $query->where('cash_shift_id', $data['cash_shift_id']);
+        }
         if (isset($data['status'])) {
             $query->where('kitchen_status', $data['status']);
         }

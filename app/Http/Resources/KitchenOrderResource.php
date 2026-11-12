@@ -12,7 +12,7 @@ class KitchenOrderResource extends JsonResource
         $timezone = $request->input('timezone', 'America/La_Paz');
 
         return [
-            'uuid' => $this->uuid, 'number' => $this->id, 'customer_name' => $this->customer_name,
+            'uuid' => $this->uuid, 'number' => $this->id, 'customer_name' => $this->customer_name, 'cash_shift_id' => $this->cash_shift_id,
             'notes' => $this->notes, 'kitchen_status' => $this->kitchen_status,
             'created_at' => $this->created_at?->toISOString(), 'updated_at' => $this->updated_at?->toISOString(),
             'created_at_display' => $this->created_at?->copy()->setTimezone($timezone)->toIso8601String(),

@@ -28,7 +28,7 @@ class CatalogResource extends JsonResource
                 ])->all();
             }
         }
-        if (($this->resource instanceof Product || $this->resource instanceof Extra) && $request->user()->role !== Role::Kitchen) {
+        if (($this->resource instanceof Product || $this->resource instanceof Extra) && ($request->user()->role !== Role::Kitchen || $request->user()->hasPermission('orders.create'))) {
             $data['price_cents'] = $this->price_cents;
         }
 

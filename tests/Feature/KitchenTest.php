@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Enums\Role;
+use App\Models\CashShift;
 use App\Models\Order;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
@@ -172,5 +173,38 @@ class KitchenTest extends TestCase
             'updated_since' => $first->json('data.0.updated_at')]);
         $this->getJson('/api/v1/kitchen/orders?'.$query, $headers)->assertOk()->assertJsonPath('data.0.uuid', $copy->uuid)
             ->assertJsonPath('meta.next_after_id', null);
+    }
+
+    public function test_queue_filters_by_cash_shift_and_preserves_legacy_pagination(): void
+    {
+        [$uuid, $seller, $sellerHeaders, , $headers] = $this->setupOrder();
+        $shifts = [];
+        foreach ([true, false] as $closed) {
+            $shifts[] = CashShift::create(['uuid' => (string) Str::uuid(), 'open_operation_id' => (string) Str::uuid(),
+                'user_id' => $seller->id, 'opening_cents' => 0, 'opened_at' => now(), 'closed_at' => $closed ? now() : null]);
+        }
+        $original = Order::where('uuid', $uuid)->firstOrFail();
+        foreach ([$shifts[0]->id, $shifts[1]->id, $shifts[1]->id] as $shiftId) {
+            $copy = $original->replicate();
+            $copy->uuid = (string) Str::uuid();
+            $copy->operation_id = (string) Str::uuid();
+            $copy->cash_shift_id = $shiftId;
+            $copy->save();
+            $copies[] = $copy;
+        }
+        $this->app['auth']->forgetGuards();
+        $this->getJson('/api/v1/kitchen/orders', $headers)->assertOk()->assertJsonPath('meta.total', 4)->assertJsonPath('data.0.cash_shift_id', null);
+        $first = $this->getJson('/api/v1/kitchen/orders?cash_shift_id='.$shifts[1]->id.'&status=NEW&per_page=1', $headers)
+            ->assertOk()->assertJsonPath('meta.total', 2)->assertJsonPath('data.0.uuid', $copies[1]->uuid)
+            ->assertJsonPath('data.0.cash_shift_id', $shifts[1]->id)->assertJsonMissingPath('data.0.total_cents')->assertJsonMissingPath('data.0.payment');
+        $query = http_build_query(['cash_shift_id' => $shifts[1]->id, 'per_page' => 1, 'after_id' => $first->json('meta.next_after_id'), 'snapshot_until' => $first->json('meta.snapshot_until')]);
+        $this->getJson('/api/v1/kitchen/orders?'.$query, $headers)->assertOk()->assertJsonPath('data.0.uuid', $copies[2]->uuid)->assertJsonPath('meta.next_after_id', null);
+        $this->getJson('/api/v1/kitchen/orders?cash_shift_id='.$shifts[0]->id, $headers)->assertOk()->assertJsonPath('meta.total', 1)->assertJsonPath('data.0.uuid', $copies[0]->uuid);
+        $this->getJson('/api/v1/kitchen/orders?cash_shift_id=0', $headers)->assertUnprocessable();
+        $this->getJson('/api/v1/kitchen/orders?cash_shift_id=abc', $headers)->assertUnprocessable();
+        $this->getJson('/api/v1/kitchen/orders/'.$copies[1]->uuid, $headers)->assertOk()->assertJsonPath('data.cash_shift_id', $shifts[1]->id);
+        $this->app['auth']->forgetGuards();
+        $this->getJson('/api/v1/kitchen/orders?cash_shift_id='.$shifts[1]->id, $sellerHeaders)->assertForbidden();
+        $this->assertDatabaseCount('orders', 4);
     }
 }
